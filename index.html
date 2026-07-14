@@ -287,7 +287,7 @@
         // Use local backend by default for testing, fallback to production
         const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
             ? "http://localhost:8000" 
-            : "https://zuraai-backend-production.up.railway.app";
+            : "https://zuraai-production.up.railway.app/";
             
         const chatWindow = document.getElementById('chat-window');
         const userInput = document.getElementById('user-input');
