@@ -28,7 +28,7 @@ def save_session_state(user_id: int, state: dict):
 # Flows that require the user to provide specific answers/content
 INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem"]
 
-def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None):
+def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
     Returns (reply, updated_state, flow_active)
     If flow_active is True, the reply should be sent and further AI processing skipped.
@@ -39,23 +39,52 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     emotion = emotion_data.get("emotion", "neutral")
 
     # --- PRIORITY 0: CRISIS MODE INTERVENTION ---
-    # If crisis mode is active, ALL logic is overridden to keep the user in the crisis flow.
+    # If crisis mode is active, ALL other logic is overridden to keep the user in the crisis flow.
     if session_state.get("crisis_mode"):
-        # "stop" or "cancel" should NOT exit crisis mode. We must keep them engaged.
-        # We can interpret it as them wanting to stop the *current question*, not the support.
-        is_stop_word = any(word in user_msg_lower for word in ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me"])
+        user_name_for_flow = user_name or session_state.get("user_name", "there")
+        
+        # Words that indicate refusal to engage further, but NOT an exit from crisis mode
+        refusal_words = ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me", "no", "i don't want to"]
+        is_refusal = any(word in user_msg_lower for word in refusal_words)
 
         current_step = session_state.get("current_step", 0)
-        # If user says "yes" to acting on thoughts (after step 0), we go to step 1 (emergency).
-        # If "no", we go to step 2 (de-escalation).
-        if current_step == 1: # We just asked if they will act on thoughts
-            if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah"]):
-                session_state["current_step"] = 1 # Explicitly go to emergency step
-            else:
-                session_state["current_step"] = 2 # Go to de-escalation step
+        next_step_index = current_step
+        
+        from app.services.therapy_service import WELLNESS_FLOWS
+        crisis_flow_length = len(WELLNESS_FLOWS["crisis_support"])
 
-        next_text = get_next_flow_step("crisis_support", session_state["current_step"])
-        session_state["current_step"] += 1
+        if current_step == 0: # Initial question: "Are you feeling like you might act on these thoughts today?"
+            if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah", "i want to"]):
+                next_step_index = 1 # Go to emergency resources step
+            elif is_refusal: # If they refuse to answer or say no
+                next_step_index = 2 # Go to de-escalation step
+            else: # Assume "no" or unsure if not explicit "yes"
+                next_step_index = 2 # Go to de-escalation step
+        elif current_step == 1 or current_step == 2: # After emergency resources or initial de-escalation
+            if is_refusal:
+                next_step_index = 5 # Go to refusal handling step
+            else:
+                next_step_index = current_step + 1 # Advance normally
+        elif current_step == 5: # After refusal handling, if they continue to refuse
+            if is_refusal:
+                next_step_index = 5 # Stay at refusal handling
+            else:
+                next_step_index = current_step + 1 # Advance normally (e.g., if they change their mind)
+        else: # For any other step in crisis flow, advance normally unless refusal
+            if is_refusal:
+                next_step_index = 5 # Go to refusal handling step
+            else:
+                next_step_index = current_step + 1
+        
+        # Ensure next_step_index doesn't exceed flow length, loop to last supportive message
+        if next_step_index >= crisis_flow_length:
+            next_step_index = crisis_flow_length - 1
+
+        next_text = get_next_flow_step("crisis_support", next_step_index)
+        if next_text and "{user_name}" in next_text:
+            next_text = next_text.replace("{user_name}", user_name_for_flow)
+
+        session_state["current_step"] = next_step_index
         session_state["active_flow"] = "crisis_support" # Ensure it stays active
         return next_text, session_state, True
 

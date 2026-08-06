@@ -122,14 +122,18 @@ WELLNESS_FLOWS = {
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
     ],
     "crisis_support": [
-        # Step 0: Initial engagement after high-risk detection.
-        "I'm really glad you're still here with me. I hear that you don't feel like reaching out to anyone right now. Can I ask one important question? Are you feeling like you might act on these thoughts today?",
-        # Step 1: User confirms immediate intent (e.g., "yes").
+        # Step 0: Initial empathetic acknowledgment and direct safety question.
+        "I'm really glad you told me this, {user_name}. It sounds like you're in a great deal of pain right now. Can I ask one important question? Are you feeling like you might act on these thoughts today?",
+        # Step 1: User confirms immediate intent (e.g., "yes"). Display emergency resources and ask about being alone.
         "Thank you for telling me. Your safety is the most important thing, and it sounds like you're in immediate danger. Please, if there's any way you can, call your local emergency services (like 911 or 988) or go to the nearest emergency department right now. If someone you trust is nearby, please tell them what's happening and ask them to stay with you. I will stay right here with you while you take that step.",
-        # Step 2: User denies immediate intent or is unsure (e.g., "no", "I don't know").
+        # Step 2: User denies immediate intent or is unsure (e.g., "no", "I don't know"). Empathetic acknowledgment and small, achievable action.
         "Thank you for being honest with me. It takes a lot of strength to talk about this. Even if you don't plan to act on it right now, these feelings are serious and you deserve support. Would you be willing to stay with me while we think about one small next step together?",
-        # Step 3: General continuation to keep the user engaged.
-        "I'm still here with you. Your safety is the most important thing right now. Please know that these feelings can pass, and help is available. Can you tell me if you are in a safe place at the moment?"
+        # Step 3: General continuation after resources/initial safety check. Suggest small actions.
+        "I'm still here with you. Your safety is the most important thing right now. Please know that these feelings can pass, and help is available. Could we take a moment to set aside anything that could possibly cause you harm, if there's anything nearby?",
+        # Step 4: Offer continued engagement or one-button actions (simulated).
+        "I'm here to support you through this. Would you like to explore some immediate steps, or would you prefer to just talk for a bit?",
+        # Step 5: Handling refusal to engage within crisis mode.
+        "Thank you for telling me. I won't pressure you. Your safety still matters to me. Can I stay with you for a few more minutes while we get through this together?"
     ],
 }
 

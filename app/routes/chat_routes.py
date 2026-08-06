@@ -145,6 +145,7 @@ async def chat(
     # --- Ensure current_user is persistent ---
     current_user = db.merge(current_user, load=False)
     session_state = get_session_state(current_user.id)
+    user_name_val = current_user.name or session_state.get("user_name")
     session_state["user_id"] = current_user.id
     
     voice_enabled = data.voice_enabled if data.voice_enabled is not None else session_state.get("voice_enabled", False)
@@ -171,7 +172,7 @@ async def chat(
 
     if (is_simple_word or is_numeric or is_onboarding_choice) and in_flow_state:
         # Fast-track flow handling without AI analysis
-        flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, db=db)
+        flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, db=db, user_name=user_name_val)
         if flow_active:
             # Skip AI entirely for simple flow steps
             save_chat_history(db, current_user.id, user_message, flow_reply, session_state.get("last_emotion", "neutral"))
@@ -200,7 +201,6 @@ async def chat(
 
     # 2. Unified Zura Response (Single AI Call)
     t_ai = time.time()
-    user_name_val = current_user.name or session_state.get("user_name")
     personalized_context = get_personalized_prompt_extension(
         user_name=user_name_val, insights=insights, wellness_count=wellness_count,
         user_profile={"tier": current_user.tier, "onboarding_layer": current_user.onboarding_layer, "support_preference": current_user.support_preference},
@@ -266,7 +266,7 @@ async def chat(
     intent_data = {"intent": analysis.get("intent") or "General chat"}
     emotion_data = {"emotion": current_emotion, "severity": severity}
     
-    flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data, db=db)
+    flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data, db=db, user_name=user_name_val)
     
     if flow_active:
         if voice_task: voice_task.cancel()
