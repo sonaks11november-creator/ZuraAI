@@ -36,12 +36,32 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     user_msg_lower = user_message.lower().strip()
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
-    
     emotion = emotion_data.get("emotion", "neutral")
-    
+
+    # --- PRIORITY 0: CRISIS MODE INTERVENTION ---
+    # If crisis mode is active, ALL logic is overridden to keep the user in the crisis flow.
+    if session_state.get("crisis_mode"):
+        # "stop" or "cancel" should NOT exit crisis mode. We must keep them engaged.
+        # We can interpret it as them wanting to stop the *current question*, not the support.
+        is_stop_word = any(word in user_msg_lower for word in ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me"])
+
+        current_step = session_state.get("current_step", 0)
+        # If user says "yes" to acting on thoughts (after step 0), we go to step 1 (emergency).
+        # If "no", we go to step 2 (de-escalation).
+        if current_step == 1: # We just asked if they will act on thoughts
+            if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah"]):
+                session_state["current_step"] = 1 # Explicitly go to emergency step
+            else:
+                session_state["current_step"] = 2 # Go to de-escalation step
+
+        next_text = get_next_flow_step("crisis_support", session_state["current_step"])
+        session_state["current_step"] += 1
+        session_state["active_flow"] = "crisis_support" # Ensure it stays active
+        return next_text, session_state, True
+
     # 0. Identify Continuations and Stops early
     continuations = [
-        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on", 
+        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
         "yes please", "we can try", "i would like that", "let's do it", "let's try", 
         "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
         "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",

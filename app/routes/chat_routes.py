@@ -231,6 +231,14 @@ async def chat(
     current_emotion = analysis.get("emotion") or "neutral"
     severity = analysis.get("severity_score") if analysis.get("severity_score") is not None else 0.2
     
+    # --- PRIORITY: Activate Crisis Mode if detected by AI ---
+    if analysis.get("crisis_mode") or (analysis.get("risk_level") == "critical"):
+        session_state["crisis_mode"] = True
+        session_state["active_flow"] = "crisis_support"
+        session_state["pending_flow"] = None
+        session_state["awaiting_confirmation"] = False
+        session_state["current_step"] = 0
+
     # 2.5 Start Voice Generation IMMEDIATELY
     voice_task = None
     if voice_enabled and final_reply:

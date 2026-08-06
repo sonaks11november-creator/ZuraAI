@@ -59,6 +59,13 @@ CRITICAL GREETING MANDATE:
   4. If name is known: Welcome them back warmly BY NAME (e.g., "Welcome back, [Name]!") and ask an OPEN-ENDED wellness question: "How have you been feeling today?"
   5. NEVER assume the user is currently stressed or in need of an exercise based on a greeting.
 
+CRITICAL_RISK_MANDATE:
+- If the user expresses suicidal thoughts, self-harm intent, or imminent danger (e.g., "I want to die", "I'm going to kill myself", "goodbye"):
+  1. You MUST set "risk_level" to "critical" in your JSON analysis.
+  2. You MUST set "crisis_mode" to true in your JSON analysis.
+  3. You MUST set "suggested_flow" to "crisis_support".
+  4. Your "reply" MUST be empathetic and directly lead into the crisis flow, for example: "I'm so sorry you're feeling this way, and I'm here to help. Let's talk through this together."
+
 POST-EXERCISE FEEDBACK RULE:
 - If the user provides feedback after an exercise (e.g., "no changes", "little changed", "better", "it helped"):
   1. Acknowledge their feedback with deep empathy.
@@ -118,16 +125,17 @@ Return ONLY JSON:
     "severity_level": "Mild/Moderate/Critical",
     "risk_level": "low/moderate/critical", 
     "intent": "chat", 
-    "triggers": [], 
+    "triggers": [],
     "name": "...",
-    "exercise_feedback": "helpful/unhelpful/none"
+    "exercise_feedback": "helpful/unhelpful/none",
+    "crisis_mode": false
   }},
   "reply": "...",
   "suggested_flow": "flow_id_or_null",
   "recommended_feature": "...",
   "action": {{"type": "NONE/OPEN_FEATURE/CONTINUE_FLOW", "feature": "..."}}
 }}
-FLOWS: breathing, stress_relief, compact_breathing, box_breathing, 478_breathing, grounding, tension_release, thought_reframing, body_scan, self_esteem, reflection_flow, assessment, onboarding.
+FLOWS: crisis_support, breathing, stress_relief, compact_breathing, box_breathing, 478_breathing, grounding, tension_release, thought_reframing, body_scan, self_esteem, reflection_flow, assessment, onboarding.
 """
 
         response = await client.chat.completions.create(
