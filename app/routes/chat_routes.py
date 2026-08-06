@@ -231,6 +231,18 @@ async def chat(
     current_emotion = analysis.get("emotion") or "neutral"
     severity = analysis.get("severity_score") if analysis.get("severity_score") is not None else 0.2
     
+    # --- PRIORITY: State Reset on Greeting ---
+    # If the AI detects a simple greeting, forcefully reset any lingering crisis/flow state
+    # This is the primary fix for the "stuck in crisis mode" bug.
+    is_greeting_intent = analysis.get("intent") == "General chat" and len(user_message) < 10
+    if is_greeting_intent and analysis.get("crisis_mode") is False:
+        session_state["crisis_mode"] = False
+        session_state["active_flow"] = None
+        session_state["pending_flow"] = None
+        session_state["awaiting_confirmation"] = False
+        session_state["current_step"] = 0
+        print("DEBUG: Greeting detected, forcing crisis_mode OFF.")
+
     # --- PRIORITY: Activate Crisis Mode if detected by AI ---
     if analysis.get("crisis_mode") or (analysis.get("risk_level") == "critical"):
         session_state["crisis_mode"] = True

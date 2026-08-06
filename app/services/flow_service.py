@@ -44,37 +44,50 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         user_name_for_flow = user_name or session_state.get("user_name", "there")
         
         # Words that indicate refusal to engage further, but NOT an exit from crisis mode
-        refusal_words = ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me", "no", "i don't want to"]
-        is_refusal = any(word in user_msg_lower for word in refusal_words)
+        refusal_words = ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me"]
+        is_refusal = any(word in user_msg_lower for word in refusal_words) or user_msg_lower in ["no", "i don't want to"]
 
         current_step = session_state.get("current_step", 0)
         next_step_index = current_step
         
         from app.services.therapy_service import WELLNESS_FLOWS
         crisis_flow_length = len(WELLNESS_FLOWS["crisis_support"])
-
+        
+        # Define explicit transitions for crisis flow
         if current_step == 0: # Initial question: "Are you feeling like you might act on these thoughts today?"
             if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah", "i want to"]):
-                next_step_index = 1 # Go to emergency resources step
+                next_step_index = 1 # Go to "move away from means" step
             elif is_refusal: # If they refuse to answer or say no
-                next_step_index = 2 # Go to de-escalation step
-            else: # Assume "no" or unsure if not explicit "yes"
-                next_step_index = 2 # Go to de-escalation step
-        elif current_step == 1 or current_step == 2: # After emergency resources or initial de-escalation
+                next_step_index = 3 # Go to de-escalation step (for "no" intent)
+            else: # Assume "no" or unsure if not explicit "yes" to acting on thoughts
+                next_step_index = 3 # Go to de-escalation step (for "no" intent)
+        elif current_step == 1: # After "move away from means" (Step 1)
             if is_refusal:
-                next_step_index = 5 # Go to refusal handling step
+                next_step_index = 2 # Go to "are you alone" step (as per user's example flow)
             else:
-                next_step_index = current_step + 1 # Advance normally
-        elif current_step == 5: # After refusal handling, if they continue to refuse
+                next_step_index = 2 # Advance to "are you alone" step
+        elif current_step == 2: # After "are you alone" (Step 2)
             if is_refusal:
-                next_step_index = 5 # Stay at refusal handling
+                next_step_index = 6 # Go to new refusal handling step (Step 6)
             else:
-                next_step_index = current_step + 1 # Advance normally (e.g., if they change their mind)
-        else: # For any other step in crisis flow, advance normally unless refusal
+                next_step_index = 4 # Advance to "set aside anything" step (Step 4)
+        elif current_step == 3: # After "no intent" de-escalation (Step 3)
             if is_refusal:
-                next_step_index = 5 # Go to refusal handling step
+                next_step_index = 6 # Go to new refusal handling step (Step 6)
             else:
-                next_step_index = current_step + 1
+                next_step_index = 4 # Advance to "set aside anything" step (Step 4)
+        elif current_step == 4: # After "set aside anything" (Step 4)
+            if is_refusal:
+                next_step_index = 6 # Go to new refusal handling step (Step 6)
+            else:
+                next_step_index = 5 # Advance to "explore steps or talk" step (Step 5)
+        elif current_step == 5: # After "explore steps or talk" (Step 5)
+            if is_refusal:
+                next_step_index = 6 # Go to new refusal handling step (Step 6)
+            else:
+                next_step_index = 6 # Default to refusal handling if no specific action is taken
+        elif current_step == 6: # After refusal handling (Step 6)
+            next_step_index = 6 # Stay at refusal handling until explicit exit
         
         # Ensure next_step_index doesn't exceed flow length, loop to last supportive message
         if next_step_index >= crisis_flow_length:
