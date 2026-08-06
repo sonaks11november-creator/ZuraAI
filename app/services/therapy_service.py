@@ -120,20 +120,22 @@ WELLNESS_FLOWS = {
         "That's wonderful. Even small things count. You're showing up for yourself, and that matters.",
         "Take a moment to acknowledge your strength. You are enough, just as you are. How does it feel to give yourself that credit?",
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
-    ],
+    ], # 0
     "crisis_support": [
-        # Step 0: Initial empathetic acknowledgment and direct safety question.
-        "I'm really glad you told me this, {user_name}. It sounds like you're in a great deal of pain right now. Can I ask one important question? Are you feeling like you might act on these thoughts today?",
-        # Step 1: User confirms immediate intent (e.g., "yes"). Display emergency resources and ask about being alone.
-        "Thank you for telling me. Your safety is the most important thing, and it sounds like you're in immediate danger. Please, if there's any way you can, call your local emergency services (like 911 or 988) or go to the nearest emergency department right now. If someone you trust is nearby, please tell them what's happening and ask them to stay with you. I will stay right here with you while you take that step.",
-        # Step 2: User denies immediate intent or is unsure (e.g., "no", "I don't know"). Empathetic acknowledgment and small, achievable action.
+        # Step 0: Initial empathetic acknowledgment and direct safety question (Assess immediacy)
+        "I'm really glad you told me this, {user_name}. I'm so sorry you're carrying this much pain. Can I ask one important question? Are you feeling like you might act on these thoughts today?",
+        # Step 1: User confirms immediate intent ("yes"). Offer concrete, small safety action.
+        "Thank you for telling me. Your safety is my priority right now. Could you move away from anything you might use to hurt yourself while we keep talking?",
+        # Step 2: Follow-up safety question after Step 1, or if user refuses Step 1's action.
+        "Thank you for being honest. I'm not going to leave this conversation. Would you tell me if you're alone right now?",
+        # Step 3: User denies immediate intent or is unsure ("no", "I don't know"). Empathetic acknowledgment and small, achievable action.
         "Thank you for being honest with me. It takes a lot of strength to talk about this. Even if you don't plan to act on it right now, these feelings are serious and you deserve support. Would you be willing to stay with me while we think about one small next step together?",
-        # Step 3: General continuation after resources/initial safety check. Suggest small actions.
+        # Step 4: General continuation after resources/initial safety check. Suggest small actions.
         "I'm still here with you. Your safety is the most important thing right now. Please know that these feelings can pass, and help is available. Could we take a moment to set aside anything that could possibly cause you harm, if there's anything nearby?",
-        # Step 4: Offer continued engagement or one-button actions (simulated).
+        # Step 5: Offer continued engagement or one-button actions (simulated).
         "I'm here to support you through this. Would you like to explore some immediate steps, or would you prefer to just talk for a bit?",
-        # Step 5: Handling refusal to engage within crisis mode.
-        "Thank you for telling me. I won't pressure you. Your safety still matters to me. Can I stay with you for a few more minutes while we get through this together?"
+        # Step 6: Handling refusal to engage within crisis mode (gentle choice-based prompt).
+        "Thank you for being honest. I'm not going to leave this conversation. We don't have to talk about everything. We could simply stay here together for a minute, or we could focus on what's making today feel so unbearable. Whichever feels easier."
     ],
 }
 
