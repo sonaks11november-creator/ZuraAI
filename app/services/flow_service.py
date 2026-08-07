@@ -268,11 +268,32 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             elif question_type == "fee_shown":
                 selected_expert = session_state.get("selected_expert")
                 if is_continuation or "book" in user_msg_lower:
-                    session_state["active_flow"] = None # End flow for now
+                    session_state["booking_step"] = "booking_guidance_shown"
                     return f"Great! To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True
                 else:
                     session_state["active_flow"] = None
                     return "Okay. What would you like to do instead?", session_state, True
+
+            elif question_type == "booking_guidance_shown":
+                selected_expert = session_state.get("selected_expert")
+                if is_continuation:
+                    # Fully reset the flow state here after the final message
+                    session_state["active_flow"] = None
+                    session_state["booking_step"] = None
+                    session_state["booking_preferences"] = {}
+                    session_state["recommended_experts"] = []
+                    session_state["selected_expert"] = None
+                    
+                    expert_name = selected_expert['name'] if selected_expert else "the expert"
+                    
+                    return (
+                        f"You're welcome! I hope you're able to connect with {expert_name} soon.\n\n"
+                        "If you need any help before or after your appointment, or if you'd like support with anything else, I'm here for you."
+                    ), session_state, True
+                else:
+                    # If they ask something else, let the AI handle it by ending the flow.
+                    session_state["active_flow"] = None
+                    return None, session_state, False
 
             answer = user_msg_lower
             

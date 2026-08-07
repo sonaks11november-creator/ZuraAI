@@ -48,6 +48,10 @@ async def generate_unified_zura_response(
         if history:
             history_context = "\nLAST 3:\n" + "\n".join([f"U: {c.message}\nA: {c.response}" for c in reversed(history[:3])])
         
+        previous_emotion_context = ""
+        if previous_emotion and previous_emotion not in ["neutral", "Neutral"]:
+            previous_emotion_context = f"\nPREVIOUS EMOTIONAL STATE: The user was recently feeling {previous_emotion}. Use this as important context for their current request."
+
         system_prompt = f"""
 You are ZuraAI, a warm and professional wellness companion. Your goal is to provide directive coaching with deep empathy and expert-level synthesis.
 
@@ -97,7 +101,10 @@ CARE NAVIGATOR MANDATE:
 - When triggering this, extract user preferences from their message into the analysis:
   - "user_preferences": {{ "city": "Kochi/Bengaluru/Mumbai/null", "language": "Malayalam/English/etc/null", "consultation_type": "In-person/Online/null" }}
   - Example: "I'm in Kochi and need a therapist who speaks Malayalam" -> "city": "Kochi", "language": "Malayalam".
-  - Also extract the primary "concern" (e.g., "Stress", "Anxiety", "Relationship Issues") from the user's initial message into "user_preferences": {{ "concern": "Stress/Anxiety/etc/null" }}.
+  - Also extract the primary "concern" into "user_preferences". To determine the "concern":
+    1. Look for it in the user's current message (e.g., "I need help with stress").
+    2. If not in the current message, check the PREVIOUS EMOTIONAL STATE. If it's a specific, actionable emotion like 'Stress', 'Anxiety', 'Depression', or 'Sadness', use that as the concern.
+    3. If neither is available, the concern is null.
   - If they only say "I need a therapist", all preferences are null.
 
 RECOGNITION & SYNTHESIS RULES:
@@ -131,6 +138,7 @@ RECOGNITION & SYNTHESIS RULES:
 
 {personalized_context}
 {memory_context}
+{previous_emotion_context}
 {history_context}
 
 Return ONLY JSON:
