@@ -170,18 +170,44 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     session_state["active_flow"] = None
                     return "Something went wrong, let's start over.", session_state, True
 
-                if any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
+                if "compare" in user_msg_lower:
+                    comparison_text = "Here’s a comparison of the recommended experts:\n\n"
+                    for i, expert in enumerate(recommended_experts):
+                        comparison_text += (
+                            f"**{i+1}. {expert['name']} – {expert['role']}**\n"
+                            f"- **Specialties:** {', '.join(expert['specializations'][:3])}\n"
+                            f"- **Languages:** {', '.join(expert['languages'])}\n\n"
+                        )
+                    comparison_text += "Would you like to view a specific expert's full profile or book an appointment?"
+                    session_state["booking_step"] = "compare_shown"
+                    return comparison_text, session_state, True
+                elif any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
                     session_state["booking_step"] = "awaiting_profile_choice"
                     expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
                     reply = "Sure! Which expert would you like to know more about?\n\n" + "\n".join(expert_names)
                     return reply, session_state, True
                 elif any(w in user_msg_lower for w in ["book", "appointment"]):
-                    session_state["active_flow"] = None # End flow for now
-                    return "To book an appointment, please visit the Mibo app or website. I can guide you there if you'd like.", session_state, True
+                    # Ask which expert to book
+                    session_state["booking_step"] = "awaiting_profile_choice" # Re-use this to select an expert
+                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                    reply = "Of course. Which expert would you like to book an appointment with?\n\n" + "\n".join(expert_names)
+                    return reply, session_state, True
                 else:
                     # Unrecognized intent, let the main AI loop handle it.
                     session_state["active_flow"] = None
                     return None, session_state, False
+
+            elif question_type == "compare_shown":
+                # After comparison, user can view profile or book. This logic is similar to recommendations_shown.
+                if any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
+                    session_state["booking_step"] = "awaiting_profile_choice"
+                    recommended_experts = session_state.get("recommended_experts", [])
+                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                    reply = "Sure! Which expert's full profile would you like to view?\n\n" + "\n".join(expert_names)
+                    return reply, session_state, True
+                # Fallback to let AI handle other intents
+                session_state["active_flow"] = None
+                return None, session_state, False
 
             elif question_type == "awaiting_profile_choice":
                 recommended_experts = session_state.get("recommended_experts", [])
@@ -203,6 +229,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                             break
                 
                 if chosen_expert:
+                    session_state["selected_expert"] = chosen_expert
                     profile_reply = (
                         f"**{chosen_expert['name']}**\n{chosen_expert['role']}\n\n"
                         f"**Experience:** {chosen_expert['experience']}\n"
@@ -219,9 +246,33 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     return reply, session_state, True
             
             elif question_type == "profile_shown":
-                # For now, any response after a profile is shown will end the flow and let the AI take over.
+                selected_expert = session_state.get("selected_expert")
+                if not selected_expert: # Safety check
+                    session_state["active_flow"] = None
+                    return "Something went wrong, let's start over.", session_state, True
+
+                if "fee" in user_msg_lower or "fees" in user_msg_lower or "how much" in user_msg_lower:
+                    fee = selected_expert.get("fee", "₹1500 per session") # Mock fee for demonstration
+                    reply = f"The consultation fee for {selected_expert['name']} is {fee}. Would you like to book an appointment?"
+                    session_state["booking_step"] = "fee_shown"
+                    return reply, session_state, True
+
+                if any(w in user_msg_lower for w in ["book", "appointment"]):
+                    session_state["active_flow"] = None # End flow for now
+                    return f"To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True
+
+                # Fallback to let AI handle other intents
                 session_state["active_flow"] = None
                 return None, session_state, False
+
+            elif question_type == "fee_shown":
+                selected_expert = session_state.get("selected_expert")
+                if is_continuation or "book" in user_msg_lower:
+                    session_state["active_flow"] = None # End flow for now
+                    return f"Great! To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True
+                else:
+                    session_state["active_flow"] = None
+                    return "Okay. What would you like to do instead?", session_state, True
 
             answer = user_msg_lower
             
