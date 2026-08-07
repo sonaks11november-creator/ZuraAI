@@ -28,6 +28,23 @@ def save_session_state(user_id: int, state: dict):
 
 # Flows that require the user to provide specific answers/content
 INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem", "therapist_booking"]
+def _get_next_booking_question(preferences: dict):
+    """Determines the next question to ask in the booking flow."""
+    if not preferences.get("concern"):
+        return "What would you like support with today?\n\n• Stress\n• Anxiety\n• Depression\n• Relationship concerns\n• Something else", "concern"
+    
+    consultation_type = preferences.get("consultation_type")
+    if not consultation_type:
+        return "Would you prefer:\n\n• Online consultation\n• In-person consultation", "consultation_type"
+    
+    if not preferences.get("language"):
+        return "Do you have a preferred language for your consultation? (e.g., Malayalam, English, Hindi)", "language"
+    
+    if consultation_type == "In-person" and not preferences.get("city"):
+        return "Which Mibo location would you prefer?\n\n• Kochi\n• Bengaluru\n• Mumbai", "city"
+    
+    return None, None # All info gathered
+
 
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
