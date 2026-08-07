@@ -129,7 +129,8 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             }
             crisis_data = {
                 "risk_level": analysis.get("risk_level", "low"),
-                "critical": analysis.get("risk_level") == "critical"
+                "critical": analysis.get("risk_level") == "critical",
+                "crisis_mode": analysis.get("crisis_mode", False)
             }
             intent_data = {
                 "intent": analysis.get("intent", "General chat")
@@ -145,7 +146,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             # Re-run flow logic now that we have AI analysis to detect pivots, greetings, or crisis
             flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
 
-            if flow_active:
+            if flow_active and flow_reply:
                 # This block will now be entered if a crisis is detected and the flow is activated.
                 final_reply = flow_reply
                 active_flow = session_state.get("active_flow")
@@ -157,6 +158,11 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 current_emotion = emotion_data["emotion"]
                 # This ensures Stress/Sadness/Sleep issues go through AI validation/support first.
 
+                # If the AI initiated the booking flow, its first question is the reply.
+                if intent_data.get("intent") == "Therapist Booking" and session_state.get("active_flow") == "therapist_booking":
+                    final_reply = ai_output.get("reply", "I can help with that. What are you looking for support with?")
+                else:
+                    final_reply = ai_output.get("reply", "I'm here for you.")
                 final_reply = ai_output.get("reply", "I'm here for you.")
                 
                 # Check if the AI or rules recommended a specific flow

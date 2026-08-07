@@ -4,6 +4,7 @@ import re
 from app.services.redis_service import redis_client, SimpleCache
 from app.services.therapy_service import get_next_flow_step
 from app.services import assessment_service
+from app.services import care_navigator_service
 
 def get_session_state(user_id: int):
     session_key = f"zura_session:{user_id}"
@@ -26,7 +27,7 @@ def save_session_state(user_id: int, state: dict):
         print(f"Redis Error (save): {e}")
 
 # Flows that require the user to provide specific answers/content
-INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem"]
+INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem", "therapist_booking"]
 
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
@@ -112,6 +113,82 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         session_state["current_step"] = next_step_index + 1 # Prepare for the next turn
         session_state["active_flow"] = "crisis_support" # Ensure it stays active
         return next_text, session_state, True
+
+    # --- PRIORITY 1: THERAPIST BOOKING FLOW ---
+    is_booking_intent = intent_data.get("intent") == "Therapist Booking"
+    active_booking_flow = session_state.get("active_flow") == "therapist_booking"
+
+    if is_booking_intent and not active_booking_flow:
+        # Activate the booking flow
+        session_state["active_flow"] = "therapist_booking"
+        session_state["current_step"] = 0
+        session_state["booking_preferences"] = intent_data.get("user_preferences", {})
+        active_booking_flow = True
+
+    if active_booking_flow:
+        step = session_state.get("current_step", 0)
+        preferences = session_state.get("booking_preferences", {})
+
+        # The first turn is handled by the AI's reply, so we start processing from the user's answer
+        if step == 0: # User answered "what support with?"
+            preferences["concern"] = user_message
+            session_state["booking_preferences"] = preferences
+            session_state["current_step"] = 1
+            return "Thank you. Would you prefer online or in-person sessions?", session_state, True
+        
+        elif step == 1: # User answered "online/in-person"
+            if "online" in user_msg_lower:
+                preferences["consultation_type"] = "Online"
+            elif "person" in user_msg_lower:
+                preferences["consultation_type"] = "In-person"
+            
+            session_state["booking_preferences"] = preferences
+            session_state["current_step"] = 2
+            return "Got it. Do you have a preferred language?", session_state, True
+
+        elif step == 2: # User answered "language"
+            # Simple extraction, can be improved with a language list check
+            preferences["language"] = user_message.strip().capitalize()
+            session_state["booking_preferences"] = preferences
+            session_state["current_step"] = 3
+
+            # All info gathered, now find experts
+            concern = preferences.get("concern", "general support")
+            severity = emotion_data.get("severity_level", "moderate")
+            
+            experts = care_navigator_service.find_experts(
+                concern=concern,
+                severity=severity.lower(),
+                preferences=preferences
+            )
+
+            # Reset flow state
+            session_state["active_flow"] = None
+            session_state["current_step"] = 0
+            session_state["booking_preferences"] = {}
+
+            if not experts:
+                return "Thank you for that information. I'm currently unable to find an exact match based on those preferences. Would you like to broaden the search, for example by looking for online experts from other cities?", session_state, True
+
+            # Generate the final recommendation text
+            recommendation_intro = f"Based on what you've shared, here are a few Mibo experts who could be a great fit:\n\n"
+            recommendations = []
+            for expert in experts:
+                # Simplified recommendation for chat
+                rec_text = (
+                    f"**{expert['name']}** ({expert['role']} in {expert['city']})\n"
+                    f"Specializes in: {', '.join(expert['specializations'][:3])}\n"
+                    f"Languages: {', '.join(expert['languages'])}"
+                )
+                recommendations.append(rec_text)
+            
+            final_reply = recommendation_intro + "\n\n---\n\n".join(recommendations)
+            final_reply += "\n\nWould you like to see more details about any of them or learn how to book a session?"
+
+            return final_reply, session_state, True
+
+        # Fallback for unexpected step
+        return "I'm sorry, I seem to have lost my place. Could we start over?", session_state, True
 
     # 0. Identify Continuations and Stops early
     continuations = [
