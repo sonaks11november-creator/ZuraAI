@@ -97,6 +97,7 @@ CARE NAVIGATOR MANDATE:
 - When triggering this, extract user preferences from their message into the analysis:
   - "user_preferences": {{ "city": "Kochi/Bengaluru/Mumbai/null", "language": "Malayalam/English/etc/null", "consultation_type": "In-person/Online/null" }}
   - Example: "I'm in Kochi and need a therapist who speaks Malayalam" -> "city": "Kochi", "language": "Malayalam".
+  - Also extract the primary "concern" (e.g., "Stress", "Anxiety", "Relationship Issues") from the user's initial message into "user_preferences": {{ "concern": "Stress/Anxiety/etc/null" }}.
   - If they only say "I need a therapist", all preferences are null.
 
 RECOGNITION & SYNTHESIS RULES:

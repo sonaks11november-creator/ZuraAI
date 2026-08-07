@@ -17,8 +17,14 @@ def map_concern_to_role_and_specialization(concern: str, severity: str) -> (Opti
     if "child" in concern_lower or "teen" in concern_lower or "adolescent" in concern_lower:
         return "Clinical Psychologist", ["Child and Adolescent Psychiatry", "Behavioural Issues"]
 
-    if any(c in concern_lower for c in ["anxiety", "stress", "work burnout", "depression", "trauma"]):
-        return "Clinical Psychologist", [concern.title()]
+    if "stress" in concern_lower or "work burnout" in concern_lower:
+        return "Clinical Psychologist", ["Stress", "Anxiety", "Burnout", "Cognitive Behaviour Therapy (CBT)"]
+    if "anxiety" in concern_lower:
+        return "Clinical Psychologist", ["Anxiety", "Stress", "Cognitive Behaviour Therapy (CBT)", "Dialectical Behaviour Therapy (DBT)"]
+    if "depression" in concern_lower:
+        return "Clinical Psychologist", ["Depression", "Mood disorders", "Cognitive Behaviour Therapy (CBT)"]
+    if "trauma" in concern_lower:
+        return "Clinical Psychologist", ["Trauma", "PTSD", "Dialectical Behaviour Therapy (DBT)"]
 
     # Default fallback
     return "Clinical Psychologist", [concern.title()]

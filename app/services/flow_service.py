@@ -38,6 +38,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
 
+    # Moved from below to be available for all flows
+    continuations = [
+        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
+        "yes please", "we can try", "i would like that", "let's do it", "let's try", 
+        "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
+        "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
+        "go ahead", "let's start", "start", "do it", "try it", "let's try it"
+    ]
+    is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
+                      any(word in user_msg_lower for word in ["done", "finished", "completed"])
+
     just_activated_crisis = False
     # --- NEW: Crisis Activation ---
     # Check if the AI analysis from the main loop has flagged a crisis
@@ -119,111 +130,134 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     active_booking_flow = session_state.get("active_flow") == "therapist_booking"
 
     if is_booking_intent and not active_booking_flow:
-        # Activate the booking flow
+        # Step 1 & 2: Detect intent and Acknowledge
         session_state["active_flow"] = "therapist_booking"
-        session_state["current_step"] = 0
         session_state["booking_preferences"] = intent_data.get("user_preferences", {})
-        active_booking_flow = True
+        session_state["booking_step"] = "intro" # Start with the intro acknowledgment
+        return (
+            "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+            "I'll just need to ask a few quick questions. Is that okay?"
+        ), session_state, True
 
     if active_booking_flow:
-        step = session_state.get("current_step", 0)
+        booking_step = session_state.get("booking_step", "intro")
         preferences = session_state.get("booking_preferences", {})
 
-        # The first turn is handled by the AI's reply, so we start processing from the user's answer
-        if step == 0: # User answered "what support with?"
-            preferences["concern"] = user_message
-            session_state["booking_preferences"] = preferences
-            session_state["current_step"] = 1
-            return "Thank you. Would you prefer online or in-person sessions?", session_state, True
-        
-        elif step == 1: # User answered "online/in-person"
-            if "online" in user_msg_lower:
-                preferences["consultation_type"] = "Online"
-            elif "person" in user_msg_lower:
-                preferences["consultation_type"] = "In-person"
+        # This block handles the user's ANSWER to the previously asked question.
+        if booking_step != "intro":
+            question_type = booking_step
+            answer = user_msg_lower
             
-            session_state["booking_preferences"] = preferences
-            session_state["current_step"] = 2
-            return "Got it. Do you have a preferred language?", session_state, True
+            if question_type == "concern":
+                preferences["concern"] = user_message.strip()
+            elif question_type == "consultation_type":
+                if "online" in answer:
+                    preferences["consultation_type"] = "Online"
+                elif "person" in answer:
+                    preferences["consultation_type"] = "In-person"
+                else: # Invalid answer, re-ask
+                    question, _ = _get_next_booking_question({"concern": preferences.get("concern")})
+                    return f"I didn't quite catch that. {question}", session_state, True
+            elif question_type == "language":
+                cleaned_lang = answer
+                for prefix in ["yes, ", "sure, ", "i prefer ", "please ", "i speak "]:
+                    if cleaned_lang.startswith(prefix):
+                        cleaned_lang = cleaned_lang[len(prefix):]
+                cleaned_lang = cleaned_lang.replace(" please", "").strip()
+                if cleaned_lang:
+                    preferences["language"] = cleaned_lang.capitalize()
+                else: # Invalid answer, re-ask
+                    question, _ = _get_next_booking_question({"concern": preferences.get("concern"), "consultation_type": preferences.get("consultation_type")})
+                    return f"Sorry, which language was that?", session_state, True
+            elif question_type == "city":
+                known_cities = ["kochi", "bengaluru", "mumbai"]
+                found_city = next((city for city in known_cities if city in answer), None)
+                if found_city:
+                    preferences["city"] = found_city.capitalize()
+                else:
+                    return "I'm sorry, I can only search in Kochi, Bengaluru, or Mumbai right now. Which would you prefer?", session_state, True
 
-        elif step == 2: # User answered "language"
-            # Simple extraction, can be improved with a language list check
-            preferences["language"] = user_message.strip().capitalize()
-            session_state["booking_preferences"] = preferences
-            session_state["current_step"] = 3
+        # Handle the intro step
+        if booking_step == "intro":
+            if not is_continuation: # User said "no" or something else
+                session_state["active_flow"] = None
+                return "Okay, no problem. What would you like to do instead?", session_state, True
+        
+        # Step 3: Collect missing information by asking the next question
+        next_question, question_type = _get_next_booking_question(preferences)
 
-            # All info gathered, now find experts
+        if next_question:
+            session_state["booking_step"] = question_type
+            session_state["booking_preferences"] = preferences
+            return next_question, session_state, True
+        else:
+            # Step 4 & 5: All info gathered, search, rank, and explain recommendations
             concern = preferences.get("concern", "general support")
             severity = emotion_data.get("severity_level", "moderate")
-            
             experts = care_navigator_service.find_experts(
                 concern=concern,
                 severity=severity.lower(),
                 preferences=preferences
             )
 
-            # Reset flow state
-            session_state["active_flow"] = None
-            session_state["current_step"] = 0
-            session_state["booking_preferences"] = {}
+            recommendation_intro = ""
+            final_reply = ""
 
             if not experts:
-                # This is now a rare case, meaning no one matched the required role at all.
-                return "I'm sorry, but I couldn't find any experts matching your primary need right now. This is unusual. We can try another wellness activity, or I can connect you with our support team to look into this.", session_state, True
-
-            # --- Generate a nuanced response based on match quality ---
-            top_expert = experts[0]
-            pref_lang = preferences.get("language")
-            pref_ctype = preferences.get("consultation_type")
-
-            lang_match = not pref_lang or pref_lang.lower() in [l.lower() for l in top_expert["languages"]]
-
-            # Default intro
-            recommendation_intro = "Based on what you've shared, here are a few Mibo experts who could be a great fit:\n\n"
-
-            # If the top match doesn't match the preferred language, it means we used a fallback. Explain it.
-            if not lang_match:
-                if pref_ctype == "Online":
-                    recommendation_intro = (
-                        f"I couldn't find an online {pref_lang}-speaking expert specializing in {concern}. "
-                        f"However, I found a few experienced psychologists who provide online consultations for this in English. "
-                        f"Since the sessions are online, you can consult them from anywhere.\n\nHere are my top recommendations:\n\n"
-                    )
-                else: # General language fallback message for in-person
-                    recommendation_intro = (
-                        f"I couldn't find an expert who speaks {pref_lang} for this concern. "
-                        "However, based on your needs, here are the closest matches I found who speak other languages:\n\n"
-                    )
-
-            recommendations = []
-            for expert in experts:
-                # Simplified recommendation for chat
-                rec_text = (
-                    f"**{expert['name']}** ({expert['role']} in {expert['city']})\n"
-                    f"Specializes in: {', '.join(expert['specializations'][:3])}\n"
-                    f"Languages: {', '.join(expert['languages'])}"
+                recommendation_intro = (
+                    "I'm sorry, but I couldn't find any experts matching your primary need right now. "
+                    "This is unusual. We can try another wellness activity, or I can connect you with "
+                    "our support team to look into this."
                 )
-                recommendations.append(rec_text)
-            
-            final_reply = recommendation_intro + "\n\n---\n\n".join(recommendations)
-            final_reply += "\n\nWould you like to see more details about any of them or learn how to book a session?"
+                final_reply = recommendation_intro
+            else:
+                recommendation_intro = "Based on what you've shared, here are the experts I'd recommend:\n\n"
+                
+                # Determine mapped specializations once before the loop for efficiency
+                _, mapped_specs_list = care_navigator_service.map_concern_to_role_and_specialization(concern, severity)
+                mapped_specs = set(s.lower() for s in mapped_specs_list)
+                recommendations = []
+                for expert in experts:
+                    rec_points = []
+                    expert_specs_lower = {s.lower() for s in expert["specializations"]}
+                    matches = mapped_specs.intersection(expert_specs_lower)
+                    
+                    if matches:
+                        display_matches = [s.title().replace("Cbt", "CBT").replace("Dbt", "DBT") for s in matches]
+                        rec_points.append(f"• Supports with {', '.join(display_matches[:2])} and emotional well-being")
+                    else:
+                        rec_points.append(f"• Experienced in {expert['specializations'][0]}")
+
+                    # Consultation type
+                    if preferences.get("consultation_type") in expert["consultation_types"]:
+                        rec_points.append(f"• Available for {preferences['consultation_type'].lower()} consultations")
+
+                    # Language
+                    rec_points.append(f"• Speaks {', '.join(expert['languages'])}")
+
+                    rec_text = (
+                        f"**{expert['name']} – {expert['role']}**\n" +
+                        "\n".join(rec_points)
+                    )
+                    recommendations.append(rec_text)
+                
+                final_reply = recommendation_intro + "\n\n---\n\n".join(recommendations)
+                # Step 6: Next action
+                final_reply += (
+                    "\n\nWould you like to:\n\n"
+                    "• View an expert's full profile\n"
+                    "• Compare the recommended experts\n"
+                    "• Book an appointment"
+                )
+
+            # Reset flow state regardless of whether experts were found
+            session_state["active_flow"] = None
+            session_state["booking_step"] = None
+            session_state["booking_preferences"] = {}
 
             return final_reply, session_state, True
 
-        # Fallback for unexpected step
-        return "I'm sorry, I seem to have lost my place. Could we start over?", session_state, True
-
     # 0. Identify Continuations and Stops early
-    continuations = [
-        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
-        "yes please", "we can try", "i would like that", "let's do it", "let's try", 
-        "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
-        "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
-        "go ahead", "let's start", "start", "do it", "try it", "let's try it"
-    ]
-    is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
-                      any(word in user_msg_lower for word in ["done", "finished", "completed"])
-    
     # Negative Feedback Detection (No improvement after exercise)
     negative_feedback = ["no change", "no changes", "still stressed", "not working", "didn't help", "no better", "still feel", "no difference"]
     has_negative_feedback = any(f in user_msg_lower for f in negative_feedback)
