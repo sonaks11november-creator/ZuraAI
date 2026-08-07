@@ -29,7 +29,7 @@ def find_experts(
     preferences: Dict = None
 ) -> List[Dict]:
     """
-    Finds and ranks suitable experts based on user's concern and preferences.
+    Finds and ranks suitable experts based on user's concern and preferences using a scoring model.
     
     :param concern: The primary issue the user is facing (e.g., "Anxiety", "Relationship problems").
     :param severity: The severity of the issue ("mild", "moderate", "severe", "critical").
@@ -43,60 +43,54 @@ def find_experts(
     if not role:
         return []
 
-    # Start with all experts
-    filtered_experts = EXPERTS
+    # --- Scoring-based matching instead of filtering ---
+    scored_experts = []
+    for expert in EXPERTS:
+        # Role is a mandatory filter. A psychiatrist and psychologist are not interchangeable for certain severities.
+        if expert["role"] != role:
+            continue
 
-    # 1. Filter by Role
-    filtered_experts = [e for e in filtered_experts if e["role"] == role]
+        score = 0
+        
+        # 1. Specialization Score (+50 for a primary match, +25 for a secondary one)
+        primary_spec = specializations[0].lower()
+        expert_specs_lower = {s.lower() for s in expert["specializations"]}
+        
+        if primary_spec in expert_specs_lower:
+            score += 50
+        elif any(s.lower() in expert_specs_lower for s in specializations):
+            score += 25
 
-    # 2. Filter by Specialization (must have at least one matching specialization)
-    spec_set = set(s.lower() for s in specializations)
-    filtered_experts = [
-        e for e in filtered_experts 
-        if any(s.lower() in spec_set for s in e["specializations"])
-    ]
+        # 2. Language Score (+30)
+        pref_lang = preferences.get("language")
+        if pref_lang and pref_lang.lower() in [l.lower() for l in expert["languages"]]:
+            score += 30
 
-    # 3. Filter by Language (if specified)
-    if preferences.get("language"):
-        lang = preferences["language"].lower()
-        filtered_experts = [
-            e for e in filtered_experts 
-            if lang in [l.lower() for l in e["languages"]]
-        ]
+        # 3. Consultation Type Score (+20)
+        pref_ctype = preferences.get("consultation_type")
+        if pref_ctype and pref_ctype in expert["consultation_types"]:
+            score += 20
+        # Bonus for online availability if in-person was preferred but not available for this expert
+        elif pref_ctype == "In-person" and "Online" in expert["consultation_types"]:
+            score += 5
 
-    # 4. Filter by City (if specified and not 'Online' preference)
-    if preferences.get("city") and preferences.get("consultation_type") != "Online":
-        city = preferences["city"].lower()
-        # Include experts in the city OR those who offer online sessions as a fallback
-        filtered_experts = [
-            e for e in filtered_experts 
-            if e["city"].lower() == city or "Online" in e["consultation_types"]
-        ]
+        # 4. City Score (+10 for in-person)
+        pref_city = preferences.get("city")
+        if pref_ctype == "In-person" and pref_city and expert["city"].lower() == pref_city.lower():
+            score += 10
 
-    # 5. Filter by Consultation Type (if specified)
-    if preferences.get("consultation_type"):
-        ctype = preferences["consultation_type"]
-        filtered_experts = [
-            e for e in filtered_experts 
-            if ctype in e["consultation_types"]
-        ]
+        # 5. Experience as a tie-breaker
+        try:
+            experience = int(expert["experience"].split('+')[0])
+            score += experience
+        except (ValueError, IndexError):
+            pass
 
-    # Simple ranking: more experience is better
-    filtered_experts.sort(key=lambda e: int(e["experience"].split('+')[0]), reverse=True)
+        if score > 0:
+            scored_experts.append({"expert": expert, "score": score})
 
-    return filtered_experts[:3] # Return top 3 matches
+    # Sort by score descending
+    scored_experts.sort(key=lambda x: x["score"], reverse=True)
 
-def generate_recommendation_text(expert: Dict, concern: str, preferences: Dict) -> str:
-    """
-    Generates a personalized recommendation string for a given expert.
-    """
-    reason = f"specializes in areas like {expert['specializations'][0]} and {expert['specializations'][1]}"
-    if "Cognitive Behaviour Therapy (CBT)" in expert['specializations']:
-        reason += ", and is experienced in approaches like CBT"
-
-    location_pref = f" in {preferences['city']}" if preferences.get('city') else ""
-    language_pref = f" who speaks {preferences['language']}" if preferences.get('language') else ""
-
-    return (f"Based on what you've shared about {concern}, I recommend {expert['name']}. "
-            f"As a {expert['role']}{location_pref}{language_pref}, they could be a great fit because they {reason}. "
-            f"Would you like to know more or see how to book a session?")
+    # Return top 3 experts' data
+    return [item["expert"] for item in scored_experts[:3]]

@@ -168,10 +168,33 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["booking_preferences"] = {}
 
             if not experts:
-                return "Thank you for that information. I'm currently unable to find an exact match based on those preferences. Would you like to broaden the search, for example by looking for online experts from other cities?", session_state, True
+                # This is now a rare case, meaning no one matched the required role at all.
+                return "I'm sorry, but I couldn't find any experts matching your primary need right now. This is unusual. We can try another wellness activity, or I can connect you with our support team to look into this.", session_state, True
 
-            # Generate the final recommendation text
-            recommendation_intro = f"Based on what you've shared, here are a few Mibo experts who could be a great fit:\n\n"
+            # --- Generate a nuanced response based on match quality ---
+            top_expert = experts[0]
+            pref_lang = preferences.get("language")
+            pref_ctype = preferences.get("consultation_type")
+
+            lang_match = not pref_lang or pref_lang.lower() in [l.lower() for l in top_expert["languages"]]
+
+            # Default intro
+            recommendation_intro = "Based on what you've shared, here are a few Mibo experts who could be a great fit:\n\n"
+
+            # If the top match doesn't match the preferred language, it means we used a fallback. Explain it.
+            if not lang_match:
+                if pref_ctype == "Online":
+                    recommendation_intro = (
+                        f"I couldn't find an online {pref_lang}-speaking expert specializing in {concern}. "
+                        f"However, I found a few experienced psychologists who provide online consultations for this in English. "
+                        f"Since the sessions are online, you can consult them from anywhere.\n\nHere are my top recommendations:\n\n"
+                    )
+                else: # General language fallback message for in-person
+                    recommendation_intro = (
+                        f"I couldn't find an expert who speaks {pref_lang} for this concern. "
+                        "However, based on your needs, here are the closest matches I found who speak other languages:\n\n"
+                    )
+
             recommendations = []
             for expert in experts:
                 # Simplified recommendation for chat
