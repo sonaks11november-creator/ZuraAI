@@ -384,6 +384,30 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["recommended_experts"] = experts
             return final_reply, session_state, True
 
+    # --- NEW: Decline handling for pending flows ---
+    is_decline = user_msg_lower in ["no", "no thanks", "not now"]
+    if session_state.get("awaiting_confirmation") and is_decline:
+        # User declined the pending flow.
+        
+        # Mark the exercise as refused
+        pending_flow = session_state.get("pending_flow")
+        if pending_flow:
+            refused = session_state.get("refused_exercises", [])
+            if pending_flow not in refused:
+                refused.append(pending_flow)
+            session_state["refused_exercises"] = refused
+
+        # Reset confirmation state so we don't get stuck here
+        session_state["awaiting_confirmation"] = False
+        session_state["pending_flow"] = None
+        
+        # Offer alternatives and let the next AI turn figure out the intent
+        reply = (
+            "That's completely okay. We don't have to do that.\n\n"
+            "Would you prefer to talk about what's on your mind, try a different kind of calming technique, or perhaps get some support from a Mibo expert?"
+        )
+        return reply, session_state, True
+
     # 0. Identify Continuations and Stops early
     # Negative Feedback Detection (No improvement after exercise)
     negative_feedback = ["no change", "no changes", "still stressed", "not working", "didn't help", "no better", "still feel", "no difference"]
