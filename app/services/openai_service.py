@@ -95,7 +95,7 @@ CARE NAVIGATOR MANDATE:
 - Key triggers for this intent: "therapist", "psychologist", "psychiatrist", "counsellor", "professional help", "severe depression", "relationship problems", "my child has behavioural issues".
 - Also, if "severity_level" is "Critical" or "risk_level" is "critical" (and not a crisis flow), this intent should be triggered to offer professional help.
 - When triggering this, extract user preferences from their message into the analysis:
-  - "user_preferences": { "city": "Kochi/Bengaluru/Mumbai/null", "language": "Malayalam/English/etc/null", "consultation_type": "In-person/Online/null" }
+  - "user_preferences": {{ "city": "Kochi/Bengaluru/Mumbai/null", "language": "Malayalam/English/etc/null", "consultation_type": "In-person/Online/null" }}
   - Example: "I'm in Kochi and need a therapist who speaks Malayalam" -> "city": "Kochi", "language": "Malayalam".
   - If they only say "I need a therapist", all preferences are null.
 
@@ -144,12 +144,12 @@ Return ONLY JSON:
     "name": "...",
     "exercise_feedback": "helpful/unhelpful/none",
     "crisis_mode": false,
-    "user_preferences": { "city": null, "language": null, "consultation_type": null }
+    "user_preferences": {{ "city": null, "language": null, "consultation_type": null }}
   }},
   "reply": "...",
   "suggested_flow": "flow_id_or_null",
   "recommended_feature": "...",
-  "action": {{"type": "NONE/OPEN_FEATURE/CONTINUE_FLOW", "feature": "..."}}
+  "action": {{ "type": "NONE/OPEN_FEATURE/CONTINUE_FLOW", "feature": "..." }}
 }}
 FLOWS: crisis_support, breathing, stress_relief, compact_breathing, box_breathing, 478_breathing, grounding, tension_release, thought_reframing, body_scan, self_esteem, reflection_flow, assessment, onboarding.
 """
