@@ -163,6 +163,66 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # This block handles the user's ANSWER to the previously asked question.
         if booking_step != "intro":
             question_type = booking_step
+
+            if question_type == "recommendations_shown":
+                recommended_experts = session_state.get("recommended_experts", [])
+                if not recommended_experts: # Safety check
+                    session_state["active_flow"] = None
+                    return "Something went wrong, let's start over.", session_state, True
+
+                if any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
+                    session_state["booking_step"] = "awaiting_profile_choice"
+                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                    reply = "Sure! Which expert would you like to know more about?\n\n" + "\n".join(expert_names)
+                    return reply, session_state, True
+                elif any(w in user_msg_lower for w in ["book", "appointment"]):
+                    session_state["active_flow"] = None # End flow for now
+                    return "To book an appointment, please visit the Mibo app or website. I can guide you there if you'd like.", session_state, True
+                else:
+                    # Unrecognized intent, let the main AI loop handle it.
+                    session_state["active_flow"] = None
+                    return None, session_state, False
+
+            elif question_type == "awaiting_profile_choice":
+                recommended_experts = session_state.get("recommended_experts", [])
+                chosen_expert = None
+                # Find by number
+                match = re.search(r'\b(\d+)\b', user_msg_lower)
+                if match:
+                    try:
+                        choice_index = int(match.group(1)) - 1
+                        if 0 <= choice_index < len(recommended_experts):
+                            chosen_expert = recommended_experts[choice_index]
+                    except (ValueError, IndexError): pass
+                
+                # Find by name if not by number
+                if not chosen_expert:
+                    for expert in recommended_experts:
+                        if expert['name'].lower() in user_msg_lower:
+                            chosen_expert = expert
+                            break
+                
+                if chosen_expert:
+                    profile_reply = (
+                        f"**{chosen_expert['name']}**\n{chosen_expert['role']}\n\n"
+                        f"**Experience:** {chosen_expert['experience']}\n"
+                        f"**Languages:** {', '.join(chosen_expert['languages'])}\n"
+                        f"**Consultation:** {', '.join(chosen_expert['consultation_types'])}\n"
+                        f"**Areas of expertise:**\n• " + "\n• ".join(chosen_expert['specializations']) +
+                        "\n\nWould you like to:\n• Book an appointment\n• Compare with another expert\n• View another profile"
+                    )
+                    session_state["booking_step"] = "profile_shown"
+                    return profile_reply, session_state, True
+                else:
+                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                    reply = "I'm sorry, I didn't recognize that choice. Please select an expert from the list by name or number:\n\n" + "\n".join(expert_names)
+                    return reply, session_state, True
+            
+            elif question_type == "profile_shown":
+                # For now, any response after a profile is shown will end the flow and let the AI take over.
+                session_state["active_flow"] = None
+                return None, session_state, False
+
             answer = user_msg_lower
             
             if question_type == "concern":
@@ -267,11 +327,10 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     "• Book an appointment"
                 )
 
-            # Reset flow state regardless of whether experts were found
-            session_state["active_flow"] = None
-            session_state["booking_step"] = None
-            session_state["booking_preferences"] = {}
-
+            # Transition to the next state instead of ending the flow
+            session_state["active_flow"] = "therapist_booking"
+            session_state["booking_step"] = "recommendations_shown"
+            session_state["recommended_experts"] = experts
             return final_reply, session_state, True
 
     # 0. Identify Continuations and Stops early
