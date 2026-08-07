@@ -52,13 +52,13 @@ async def generate_unified_zura_response(
 You are ZuraAI, a warm and professional wellness companion. Your goal is to provide directive coaching with deep empathy and expert-level synthesis.
 
 CRITICAL GREETING MANDATE:
-- If the current message is a simple greeting (e.g., "Hi", "Hello", "Hii", "Hey"):
+- If the current message is a simple greeting or a short, neutral reply (e.g., "Hi", "Hello", "Hii", "Hey", "what", "no", "ok"):
   1. You MUST set "emotion" to "neutral" in your JSON analysis.
   2. You MUST NOT suggest or start any exercise, flow, or intervention.
   3. If name is unknown: Follow MISSING NAME RULE.
   4. You MUST set "crisis_mode" to false.
-  4. If name is known: Welcome them back warmly BY NAME (e.g., "Welcome back, [Name]!") and ask an OPEN-ENDED wellness question: "How have you been feeling today?"
-  5. NEVER assume the user is currently stressed or in need of an exercise based on a greeting.
+  5. If name is known: Welcome them back warmly BY NAME (e.g., "Welcome back, [Name]!") and ask an OPEN-ENDED wellness question: "How have you been feeling today?"
+  6. NEVER assume the user is currently stressed or in need of an exercise based on a greeting.
 
 CRITICAL_RISK_MANDATE:
 - If the user expresses suicidal thoughts, self-harm intent, or imminent danger (e.g., "I want to die", "I'm going to kill myself", "goodbye"):
@@ -178,7 +178,7 @@ FLOWS: crisis_support, breathing, stress_relief, compact_breathing, box_breathin
         return {"analysis": {"emotion": "neutral", "severity_score": 0.2, "severity_level": "Mild", "risk_level": "low", "intent": "chat"}, "reply": "I'm here for you, but I'm a bit overwhelmed right now. Let's take a slow breath together.", "suggested_flow": "breathing", "recommended_feature": "BREATHE", "action": {"type": "CONTINUE_FLOW", "feature": "BREATHE", "flow": "breathing"}}
     except Exception as e:
         print(f"Unified Response Error: {e}")
-        return None
+        return {"analysis": {"emotion": "neutral", "severity_score": 0.1, "severity_level": "Mild", "risk_level": "low", "intent": "chat"}, "reply": "I'm sorry, I'm having a little trouble connecting right now. Could you please repeat that?", "suggested_flow": None}
 
 async def comprehensive_analysis(message: str, previous_emotion: str = None):
     """Compatibility wrapper for websocket_service.py"""

@@ -122,7 +122,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     
     # Check for greeting (either AI detected or keyword matched)
     has_greeting_word = any(word == user_msg_lower or user_msg_lower.startswith(word + " ") for word in greetings)
-    is_greeting = (intent_data.get("intent") == "General chat" and has_greeting_word) or (has_greeting_word and len(user_msg_lower) < 10)
+    is_greeting = (intent_data.get("emotion") == "neutral" and has_greeting_word) or (has_greeting_word and len(user_msg_lower) < 10)
     
     # Emotional Pivot Detection: Only pivot if NOT a simple continuation
     is_explicit_emotion = any(phrase in user_msg_lower for phrase in ["i feel", "i'm feeling", "i am feeling", "feeling really", "feeling so"])

@@ -46,40 +46,6 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             user = db.query(User).filter(User.id == user_id).first()
             user_name = user.name if user else None
 
-            # 1. Comprehensive Analysis (Consolidated into 1 call for speed)
-            analysis = await comprehensive_analysis(
-                user_message, 
-                previous_emotion=session_state.get("last_emotion")
-            )
-            
-            if analysis:
-                emotion_data = {
-                    "emotion": analysis.get("emotion", "neutral"),
-                    "severity": analysis.get("severity_score", 0.2),
-                    "severity_level": analysis.get("severity_level", "Mild")
-                }
-                crisis_data = {
-                    "risk_level": analysis.get("risk_level", "low"),
-                    "critical": analysis.get("risk_level") == "critical"
-                }
-                intent_data = {
-                    "intent": analysis.get("intent", "General chat")
-                }
-                
-                # Background tasks for DB updates
-                asyncio.create_task(asyncio.to_thread(track_triggers, db, user_id, analysis.get("triggers", [])))
-                if analysis.get("name"):
-                    asyncio.create_task(asyncio.to_thread(update_user_name, db, user_id, analysis.get("name")))
-            else:
-                # Fallback if AI analysis fails
-                emotion_data = {"emotion": "neutral", "severity": 0.2, "severity_level": "Mild"}
-                crisis_data = {"risk_level": "low", "critical": False}
-                intent_data = {"intent": "General chat"}
-            
-            # Re-fetch name if it was just extracted
-            db.refresh(user)
-            user_name = user.name
-
             # 2. Flow Orchestration (Priority 1)
             flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db)
             
@@ -142,6 +108,42 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 }
             )
 
+            # 1. Comprehensive AI Response Generation (Single Call)
+            ai_output = await generate_ai_response(
+                message=user_message,
+                memories=retrieved_memories,
+                history=history,
+                last_exercise=session_state.get("last_exercise"),
+                completed_exercises=session_state.get("completed_exercises", []),
+                refused_exercises=session_state.get("refused_exercises", []),
+                personality=personality_mode(session_state.get("last_emotion", "neutral")),
+                personalized_context=personalized_context
+            )
+
+            analysis = ai_output.get("analysis", {})
+            emotion_data = {
+                "emotion": analysis.get("emotion", "neutral"),
+                "severity": analysis.get("severity_score", 0.2),
+                "severity_level": analysis.get("severity_level", "Mild")
+            }
+            crisis_data = {
+                "risk_level": analysis.get("risk_level", "low"),
+                "critical": analysis.get("risk_level") == "critical"
+            }
+            intent_data = {
+                "intent": analysis.get("intent", "General chat")
+            }
+
+            # Background tasks for DB updates
+            asyncio.create_task(asyncio.to_thread(track_triggers, db, user_id, analysis.get("triggers", [])))
+            if analysis.get("name") and not user_name:
+                asyncio.create_task(asyncio.to_thread(update_user_name, db, user_id, analysis.get("name")))
+                db.refresh(user)
+                user_name = user.name
+
+            # Re-run flow logic now that we have AI analysis to detect pivots or greetings
+            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
+
             # 4. Safety Check & State Transitions
             last_severity = session_state.get("last_severity", 0.0)
             current_severity = emotion_data["severity"]
@@ -168,45 +170,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             else:
                 # DEFAULT: AI Chat + Wellness Flow Detection
                 # This ensures Stress/Sadness/Sleep issues go through AI validation/support first.
-                
-                refused = session_state.get("refused_exercises", [])
-                completed = session_state.get("completed_exercises", [])
 
-                # Rule: Panic detected -> crisis calming flow (Slow Breathing)
-                if current_emotion == "panic" and "breathing" not in refused and "compact_breathing" not in refused:
-                    ai_output = {
-                        "reply": "I'm right here with you. Let’s slow things down together. Take a slow breath in...",
-                        "intent": "breathe",
-                        "recommended_feature": "BREATHE"
-                    }
-                # Rule: Sadness increases -> grounding support
-                elif current_emotion == "sadness" and current_severity > last_severity and last_emotion == "sadness" and current_severity > 0.6 and "grounding" not in refused:
-                    ai_output = {
-                        "reply": "I can feel things getting a bit heavier. Let's try to ground ourselves in the present moment together. Can you name 3 things you see right now?",
-                        "intent": "grounding",
-                        "recommended_feature": "GROUNDING"
-                    }
-                else:
-                    # 5. Generate AI Response (Normal Chat)
-                    # Detect slight improvement
-                    if last_severity > 0 and current_severity < last_severity:
-                        if not session_state.get("premium_mentioned"):
-                            personalized_context += "\nUSER STATUS: They are showing slight improvement. This is a perfect, natural moment to acknowledge their win and briefly mention a relevant Mibo Premium feature (like sleep programs or wellness journeys) before pivoting to exploration.\n"
-                        else:
-                            personalized_context += "\nUSER STATUS: They are showing slight improvement. Pivot to exploring the cause of stress rather than suggesting more exercises.\n"
-
-                    ai_output = await generate_ai_response(
-                        message=user_message,
-                        emotion=current_emotion,
-                        memories=retrieved_memories,
-                        history=history,
-                        last_exercise=session_state.get("last_exercise"),
-                        completed_exercises=completed,
-                        refused_exercises=refused,
-                        personality=personality_mode(current_emotion),
-                        personalized_context=personalized_context
-                    )
-                
                 final_reply = ai_output.get("reply", "I'm here for you.")
                 
                 # Check if AI mentioned Premium and update state
