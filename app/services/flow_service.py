@@ -36,7 +36,16 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     user_msg_lower = user_message.lower().strip()
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
-    emotion = emotion_data.get("emotion", "neutral")
+
+    just_activated_crisis = False
+    # --- NEW: Crisis Activation ---
+    # Check if the AI analysis from the main loop has flagged a crisis
+    is_crisis_signal = intent_data.get("crisis_mode") or intent_data.get("risk_level") == "critical"
+    if is_crisis_signal and not session_state.get("crisis_mode"):
+        session_state["crisis_mode"] = True
+        session_state["active_flow"] = "crisis_support"
+        session_state["current_step"] = 0
+        just_activated_crisis = True
 
     # --- PRIORITY 0: CRISIS MODE INTERVENTION ---
     # If crisis mode is active, ALL other logic is overridden to keep the user in the crisis flow.
@@ -53,41 +62,44 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         from app.services.therapy_service import WELLNESS_FLOWS
         crisis_flow_length = len(WELLNESS_FLOWS["crisis_support"])
         
-        # Define explicit transitions for crisis flow
-        if current_step == 0: # Initial question: "Are you feeling like you might act on these thoughts today?"
-            if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah", "i want to"]):
-                next_step_index = 1 # Go to "move away from means" step
-            elif is_refusal: # If they refuse to answer or say no
-                next_step_index = 3 # Go to de-escalation step (for "no" intent)
-            else: # Assume "no" or unsure if not explicit "yes" to acting on thoughts
-                next_step_index = 3 # Go to de-escalation step (for "no" intent)
-        elif current_step == 1: # After "move away from means" (Step 1)
-            if is_refusal:
-                next_step_index = 2 # Go to "are you alone" step (as per user's example flow)
-            else:
-                next_step_index = 2 # Advance to "are you alone" step
-        elif current_step == 2: # After "are you alone" (Step 2)
-            if is_refusal:
-                next_step_index = 6 # Go to new refusal handling step (Step 6)
-            else:
-                next_step_index = 4 # Advance to "set aside anything" step (Step 4)
-        elif current_step == 3: # After "no intent" de-escalation (Step 3)
-            if is_refusal:
-                next_step_index = 6 # Go to new refusal handling step (Step 6)
-            else:
-                next_step_index = 4 # Advance to "set aside anything" step (Step 4)
-        elif current_step == 4: # After "set aside anything" (Step 4)
-            if is_refusal:
-                next_step_index = 6 # Go to new refusal handling step (Step 6)
-            else:
-                next_step_index = 5 # Advance to "explore steps or talk" step (Step 5)
-        elif current_step == 5: # After "explore steps or talk" (Step 5)
-            if is_refusal:
-                next_step_index = 6 # Go to new refusal handling step (Step 6)
-            else:
-                next_step_index = 6 # Default to refusal handling if no specific action is taken
-        elif current_step == 6: # After refusal handling (Step 6)
-            next_step_index = 6 # Stay at refusal handling until explicit exit
+        if just_activated_crisis:
+            next_step_index = 0
+        else:
+            # Define explicit transitions for crisis flow based on user's response
+            if current_step == 0: # Initial question: "Are you feeling like you might act on these thoughts today?"
+                if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah", "i want to"]):
+                    next_step_index = 1 # Go to "move away from means" step
+                elif is_refusal: # If they refuse to answer or say no
+                    next_step_index = 3 # Go to de-escalation step (for "no" intent)
+                else: # Assume "no" or unsure if not explicit "yes" to acting on thoughts
+                    next_step_index = 3 # Go to de-escalation step (for "no" intent)
+            elif current_step == 1: # After "move away from means" (Step 1)
+                if is_refusal:
+                    next_step_index = 2 # Go to "are you alone" step (as per user's example flow)
+                else:
+                    next_step_index = 2 # Advance to "are you alone" step
+            elif current_step == 2: # After "are you alone" (Step 2)
+                if is_refusal:
+                    next_step_index = 6 # Go to new refusal handling step (Step 6)
+                else:
+                    next_step_index = 4 # Advance to "set aside anything" step (Step 4)
+            elif current_step == 3: # After "no intent" de-escalation (Step 3)
+                if is_refusal:
+                    next_step_index = 6 # Go to new refusal handling step (Step 6)
+                else:
+                    next_step_index = 4 # Advance to "set aside anything" step (Step 4)
+            elif current_step == 4: # After "set aside anything" (Step 4)
+                if is_refusal:
+                    next_step_index = 6 # Go to new refusal handling step (Step 6)
+                else:
+                    next_step_index = 5 # Advance to "explore steps or talk" step (Step 5)
+            elif current_step == 5: # After "explore steps or talk" (Step 5)
+                if is_refusal:
+                    next_step_index = 6 # Go to new refusal handling step (Step 6)
+                else:
+                    next_step_index = 6 # Default to refusal handling if no specific action is taken
+            elif current_step == 6: # After refusal handling (Step 6)
+                next_step_index = 6 # Stay at refusal handling until explicit exit
         
         # Ensure next_step_index doesn't exceed flow length, loop to last supportive message
         if next_step_index >= crisis_flow_length:
@@ -97,7 +109,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         if next_text and "{user_name}" in next_text:
             next_text = next_text.replace("{user_name}", user_name_for_flow)
 
-        session_state["current_step"] = next_step_index
+        session_state["current_step"] = next_step_index + 1 # Prepare for the next turn
         session_state["active_flow"] = "crisis_support" # Ensure it stays active
         return next_text, session_state, True
 
@@ -126,6 +138,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     
     # Emotional Pivot Detection: Only pivot if NOT a simple continuation
     is_explicit_emotion = any(phrase in user_msg_lower for phrase in ["i feel", "i'm feeling", "i am feeling", "feeling really", "feeling so"])
+    emotion = emotion_data.get("emotion", "neutral")
     is_emotional_pivot = (not is_continuation) and (emotion != "neutral" or is_explicit_emotion)
 
     # 1a. State Reset (Greeting or Pivot)

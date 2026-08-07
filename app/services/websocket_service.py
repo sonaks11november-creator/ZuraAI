@@ -46,8 +46,9 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             user = db.query(User).filter(User.id == user_id).first()
             user_name = user.name if user else None
 
+            intent_data = {} # Initialize to prevent NameError on first pass
             # 2. Flow Orchestration (Priority 1)
-            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db)
+            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
             
             if flow_active:
                 # Track exercise completion if a flow just finished
@@ -141,43 +142,22 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 db.refresh(user)
                 user_name = user.name
 
-            # Re-run flow logic now that we have AI analysis to detect pivots or greetings
-            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
+            # Re-run flow logic now that we have AI analysis to detect pivots, greetings, or crisis
+            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
 
-            # 4. Safety Check & State Transitions
-            last_severity = session_state.get("last_severity", 0.0)
-            current_severity = emotion_data["severity"]
-            last_emotion = session_state.get("last_emotion", "neutral")
-            current_emotion = emotion_data["emotion"]
-
-            # Rule: Distress becomes severe/critical -> therapist escalation
-            # We only escalate immediately if it's CRITICAL. 
-            # For Mild/Moderate (severity < 0.9), we use wellness tools first.
-            is_critical = current_severity >= 0.9 or crisis_data["risk_level"] == "critical"
-            is_moderate_high = current_severity > 0.8 or crisis_data["risk_level"] == "moderate"
-            
-            if is_critical:
-                final_reply = "I'm really sorry you're going through this much pain right now. You don't have to face this alone. I strongly encourage connecting with immediate emotional support or a licensed professional through Mibo’s support system."
-                recommended_feature = "INSTANT_SUPPORT"
-                action_data = {"type": "EMERGENCY_SUPPORT", "feature": "INSTANT_SUPPORT"}
-                redis_client.delete(f"zura_session:{user_id}")
-            elif is_moderate_high and current_emotion in ["hopelessness", "fear"]:
-                # Only escalate moderate for high-risk emotions
-                final_reply = "I can hear how much you're carrying right now. It might be helpful to talk this through with someone who can offer specialized support. Would you like to see how to connect with a professional?"
-                recommended_feature = "THERAPIST_BOOKING"
-                action_data = {"type": "THERAPIST_ESCALATION", "feature": "THERAPIST_BOOKING"}
-                session_state.update({"last_severity": current_severity, "last_emotion": current_emotion})
+            if flow_active:
+                # This block will now be entered if a crisis is detected and the flow is activated.
+                final_reply = flow_reply
+                active_flow = session_state.get("active_flow")
+                action_data = {"type": "CONTINUE_FLOW", "feature": active_flow.upper() if active_flow else "BREATHE"}
+                recommended_feature = active_flow.upper() if active_flow else "BREATHE"
             else:
                 # DEFAULT: AI Chat + Wellness Flow Detection
+                current_severity = emotion_data["severity"]
+                current_emotion = emotion_data["emotion"]
                 # This ensures Stress/Sadness/Sleep issues go through AI validation/support first.
 
                 final_reply = ai_output.get("reply", "I'm here for you.")
-                
-                # Check if AI mentioned Premium and update state
-                if any(keyword in final_reply.lower() for keyword in ["premium", "programs", "guided sessions", "wellness journeys"]):
-                    session_state["premium_mentioned"] = True
-                    
-                recommended_feature = ai_output.get("recommended_feature", "ZURAAI_CHAT")
                 
                 # Check if the AI or rules recommended a specific flow
                 intent_ai = ai_output.get("intent", "").lower()
@@ -246,6 +226,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                     save_session_state(user_id, session_state)
 
             # 6. Post-Response Tasks
+            save_session_state(user_id, session_state)
             track_mood(db, user_id, emotion_data["emotion"], emotion_data["severity"], context=user_message)
             save_chat_history(db, user_id, user_message, final_reply, emotion_data["emotion"])
             asyncio.create_task(asyncio.to_thread(save_memory, user_id, user_message, emotion_data["emotion"], intent_data["intent"]))
