@@ -231,28 +231,6 @@ async def chat(
     current_emotion = analysis.get("emotion") or "neutral"
     severity = analysis.get("severity_score") if analysis.get("severity_score") is not None else 0.2
     
-    # --- PRIORITY: Handle Flow State & Crisis Mode from AI Analysis ---
-    is_greeting_intent = analysis.get("intent") == "General chat" and len(user_message) < 10
-    
-    # Deactivate crisis mode if the AI explicitly says so, or if it's a simple greeting.
-    # This allows a new intent (like booking a doctor) to break the crisis loop.
-    if (analysis.get("crisis_mode") is False or is_greeting_intent) and session_state.get("crisis_mode"):
-        print("DEBUG: AI or greeting is deactivating crisis mode.")
-        session_state["crisis_mode"] = False
-        if session_state.get("active_flow") == "crisis_support":
-            session_state["active_flow"] = None
-
-    # A greeting should always reset non-crisis flows.
-    if is_greeting_intent:
-        session_state["active_flow"] = None # Reset any active wellness flow
-
-    # Activate crisis mode if AI signals it and it's not already active.
-    if (analysis.get("crisis_mode") is True or analysis.get("risk_level") == "critical") and not session_state.get("crisis_mode"):
-        print("DEBUG: AI is activating crisis mode.")
-        session_state["crisis_mode"] = True
-        session_state["active_flow"] = "crisis_support" # Force into crisis flow
-        session_state["current_step"] = 0 # Start from the beginning
-
     # 2.5 Start Voice Generation IMMEDIATELY
     voice_task = None
     if voice_enabled and final_reply:
