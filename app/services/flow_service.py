@@ -63,106 +63,48 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     user_msg_lower = user_message.lower().strip()
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
-    
-    # --- PRIORITY 0: CRISIS MODE INTERVENTION ---
-    # This block is the absolute authority on crisis state.
-    # It activates, maintains, and deactivates crisis mode.
 
-    # Activation: Check if AI analysis from the main loop has flagged a crisis
-    is_crisis_signal = intent_data.get("crisis_mode") is True or intent_data.get("risk_level") == "critical"
-    if is_crisis_signal and not session_state.get("crisis_mode"):
-        session_state["crisis_mode"] = True
+    # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
+    # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
+
+    # Activation:
+    is_critical_risk_signal = intent_data.get("risk_level") == "critical"
+    if is_critical_risk_signal and not session_state.get("critical_risk_active"):
+        session_state["critical_risk_active"] = True
         session_state["active_flow"] = "crisis_support"
         session_state["current_step"] = 0
-        # Fall through to the crisis handling logic below
 
-    if session_state.get("crisis_mode"):
+    # Main handler for the critical risk state:
+    if session_state.get("critical_risk_active"):
         user_name_for_flow = user_name or session_state.get("user_name", "there")
-        
-        # Deactivation: Check for explicit user de-escalation
-        deescalation_phrases = ["i'm okay", "i feel better", "i'm safe now", "don't worry i'm fine", "i am fine"]
-        is_deescalation = any(phrase in user_msg_lower for phrase in deescalation_phrases)
-        if is_deescalation:
-            session_state["crisis_mode"] = False
-            session_state["active_flow"] = None
-            session_state["current_step"] = 0
-            return "I'm so relieved to hear that. Thank you for telling me. I'm still here for you. What would you like to do now?", session_state, True
-
-        # Pivot Handling: If user in crisis asks for an expert, acknowledge but keep them in the safety flow.
-        is_booking_intent = intent_data.get("intent") in ["Therapist Booking", "Doctor Booking"]
-        if is_booking_intent:
-            # Respond with a crisis-aware message and stay in the crisis flow
-            next_text = get_next_flow_step("crisis_support", 2) # "are you alone" step
-            reply = (
-                "I hear you, and connecting with an expert is a very important step. We will absolutely do that. "
-                f"Your safety is my highest priority right now. {next_text}"
-            )
-            session_state["current_step"] = 3 # Prepare for the next step in the crisis flow
-            return reply, session_state, True
-
-        # Standard Crisis Flow Progression (using the existing state machine)
-        just_activated_crisis = is_crisis_signal and session_state.get("current_step", 0) == 0
-
-        # Words that indicate refusal to engage further, but NOT an exit from crisis mode
-        refusal_words = ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me"]
-        is_refusal = any(word in user_msg_lower for word in refusal_words) or user_msg_lower in ["no", "i don't want to"]
-
         current_step = session_state.get("current_step", 0)
-        next_step_index = current_step
-        
-        from app.services.therapy_service import WELLNESS_FLOWS
-        crisis_flow_length = len(WELLNESS_FLOWS["crisis_support"])
-        
-        if just_activated_crisis:
-            next_step_index = 0
+
+        # Step 0: Initial Escalation. This is sent ONCE upon detection.
+        if current_step == 0:
+            message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+            session_state["current_step"] = 1 # We are now waiting for their answer to "are you in danger?"
+            return message, session_state, True
+
+        # Step 1: Process the answer to "are you in danger?"
+        if current_step == 1:
+            is_danger_response = any(w in user_msg_lower for w in ["yes", "i am", "i think so", "maybe"])
+            # If they say yes, use step 1 of the flow. If no/unsure, use step 2.
+            next_step_index = 1 if is_danger_response else 2
+            message = get_next_flow_step("crisis_support", next_step_index)
+            session_state["current_step"] = 3 # Move to the general supportive loop state
+            return message, session_state, True
+
+        # Step 3 onwards: Persistent supportive loop. The user cannot exit this loop.
+        # Any message they send gets a supportive response, redirecting to the crisis line if needed.
+        if "expert" in user_msg_lower or "doctor" in user_msg_lower or "therapist" in user_msg_lower:
+            message = "I hear you asking for an expert, and that is a very important step. The best and fastest way to connect with a trained person right now is to call the Tele-MANAS helpline at 14416. They are available 24/7."
         else:
-            # Define explicit transitions for crisis flow based on user's response
-            if current_step == 0: # Initial question: "Are you feeling like you might act on these thoughts today?"
-                if any(w in user_msg_lower for w in ["yes", "i am", "i will", "yeah", "i want to"]):
-                    next_step_index = 1 # Go to "move away from means" step
-                elif is_refusal: # If they refuse to answer or say no
-                    next_step_index = 3 # Go to de-escalation step (for "no" intent)
-                else: # Assume "no" or unsure if not explicit "yes" to acting on thoughts
-                    next_step_index = 3 # Go to de-escalation step (for "no" intent)
-            elif current_step == 1: # After "move away from means" (Step 1)
-                if is_refusal:
-                    next_step_index = 2 # Go to "are you alone" step (as per user's example flow)
-                else:
-                    next_step_index = 2 # Advance to "are you alone" step
-            elif current_step == 2: # After "are you alone" (Step 2)
-                if is_refusal:
-                    next_step_index = 6 # Go to new refusal handling step (Step 6)
-                else:
-                    next_step_index = 4 # Advance to "set aside anything" step (Step 4)
-            elif current_step == 3: # After "no intent" de-escalation (Step 3)
-                if is_refusal:
-                    next_step_index = 6 # Go to new refusal handling step (Step 6)
-                else:
-                    next_step_index = 4 # Advance to "set aside anything" step (Step 4)
-            elif current_step == 4: # After "set aside anything" (Step 4)
-                if is_refusal:
-                    next_step_index = 6 # Go to new refusal handling step (Step 6)
-                else:
-                    next_step_index = 5 # Advance to "explore steps or talk" step (Step 5)
-            elif current_step == 5: # After "explore steps or talk" (Step 5)
-                if is_refusal:
-                    next_step_index = 6 # Go to new refusal handling step (Step 6)
-                else:
-                    next_step_index = 6 # Default to refusal handling if no specific action is taken
-            elif current_step == 6: # After refusal handling (Step 6)
-                next_step_index = 6 # Stay at refusal handling until explicit exit
-        
-        # Ensure next_step_index doesn't exceed flow length, loop to last supportive message
-        if next_step_index >= crisis_flow_length:
-            next_step_index = crisis_flow_length - 1
+            # Use the generic "I'm still here" message from the flow.
+            message = get_next_flow_step("crisis_support", 3)
 
-        next_text = get_next_flow_step("crisis_support", next_step_index)
-        if next_text and "{user_name}" in next_text:
-            next_text = next_text.replace("{user_name}", user_name_for_flow)
-
-        session_state["current_step"] = next_step_index + 1 # Prepare for the next turn
-        session_state["active_flow"] = "crisis_support" # Ensure it stays active
-        return next_text, session_state, True
+        # We stay in step 3.
+        session_state["current_step"] = 3
+        return message, session_state, True
 
     continuations = [
         "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
@@ -605,16 +547,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             
             # Handle emergency override for onboarding Q3
             if active_assessment == "onboarding" and current_step == 2 and raw_answer == 'D':
-                session_state["active_assessment"] = None
-                session_state["assessment_step"] = 0
-                return (
-                    "I hear you, and I want you to know you're not alone. I'm here to help you get the support you need right now.\n\n"
-                    "Please reach out to a crisis resource immediately:\n"
-                    "• **National Crisis Line**: Call or text 988\n"
-                    "• **Emergency Services**: Call 911\n\n"
-                    "Would you like me to help you connect with a live support person who can talk with you right now?",
-                    session_state, True
-                )
+                # This is a critical risk signal. Activate the full crisis protocol.
+                session_state["active_assessment"] = None # Exit assessment
+                session_state["critical_risk_active"] = True
+                session_state["active_flow"] = "crisis_support"
+                session_state["current_step"] = 0 # Start the crisis flow from the beginning
+
+                # Return the first message of the crisis flow directly.
+                user_name_for_flow = user_name or session_state.get("user_name", "there")
+                escalation_message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+                session_state["current_step"] = 1 # We've sent step 0, now waiting for response.
+                return escalation_message, session_state, True
 
             # Convert letter to score if needed for standard assessments (A=0, B=1, etc.)
             # Or just store the raw answer for onboarding

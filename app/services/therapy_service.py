@@ -122,20 +122,17 @@ WELLNESS_FLOWS = {
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
     ], # 0
     "crisis_support": [
-        # Step 0: Initial empathetic acknowledgment and direct safety question (Assess immediacy)
-        "I'm really glad you told me this, {user_name}. I'm so sorry you're carrying this much pain. Can I ask one important question? Are you feeling like you might act on these thoughts today?",
-        # Step 1: User confirms immediate intent ("yes"). Offer concrete, small safety action.
-        "Thank you for telling me. Your safety is my priority right now. Could you move away from anything you might use to hurt yourself while we keep talking?",
-        # Step 2: Follow-up safety question after Step 1, or if user refuses Step 1's action.
-        "Thank you for being honest. I'm not going to leave this conversation. Would you tell me if you're alone right now?",
-        # Step 3: User denies immediate intent or is unsure ("no", "I don't know"). Empathetic acknowledgment and small, achievable action.
-        "Thank you for being honest with me. It takes a lot of strength to talk about this. Even if you don't plan to act on it right now, these feelings are serious and you deserve support. Would you be willing to stay with me while we think about one small next step together?",
-        # Step 4: General continuation after resources/initial safety check. Suggest small actions.
-        "I'm still here with you. Your safety is the most important thing right now. Please know that these feelings can pass, and help is available. Could we take a moment to set aside anything that could possibly cause you harm, if there's anything nearby?",
-        # Step 5: Offer continued engagement or one-button actions (simulated).
-        "I'm here to support you through this. Would you like to explore some immediate steps, or would you prefer to just talk for a bit?",
-        # Step 6: Handling refusal to engage within crisis mode (gentle choice-based prompt).
-        "Thank you for being honest. I'm not going to leave this conversation. We don't have to talk about everything. We could simply stay here together for a minute, or we could focus on what's making today feel so unbearable. Whichever feels easier."
+        # Step 0: Immediate, direct escalation with resources. This is the first message sent when critical risk is detected.
+        "{user_name}, I’m really concerned about your immediate safety. Please don’t stay alone right now.\n\nIf you think you might hurt yourself or you have already done something to harm yourself, please seek emergency medical help immediately or ask someone you trust to take you to the nearest emergency department.\n\nIn India, you can also call Tele-MANAS at 14416, a 24/7 mental-health support service where you can speak with a trained counsellor.\n\nFor now, please move away from anything you could use to hurt yourself and stay with another person if possible.\n\nAre you in immediate danger of hurting yourself right now?",
+        
+        # Step 1: Response if user says "yes" to immediate danger.
+        "Thank you for being honest with me. It is critical that you get help right now. Please call Tele-MANAS at 14416 or have someone take you to an emergency room. I will stay here with you, but your immediate connection to human support is the most important thing. Can you let me know if you are able to make that call?",
+        
+        # Step 2: Response if user says "no" or is unsure.
+        "I'm relieved to hear you're not in immediate danger, but I know these feelings are still incredibly heavy and serious. Thank you for staying and talking with me. It takes immense strength to do that. We don't have to solve everything at once. Can we just stay here together for a bit?",
+
+        # Step 3: Gentle re-engagement after the initial safety check.
+        "I'm still here with you. We can talk about what's on your mind, or we can just sit in silence for a moment. There's no pressure. What feels right for you?"
     ],
 }
 
