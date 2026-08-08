@@ -103,16 +103,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # Standard Crisis Flow Progression (using the existing state machine)
         just_activated_crisis = is_crisis_signal and session_state.get("current_step", 0) == 0
 
-    continuations = [
-        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
-        "yes please", "we can try", "i would like that", "let's do it", "let's try", 
-        "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
-        "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
-        "go ahead", "let's start", "start", "do it", "try it", "let's try it"
-    ]
-    is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
-                      any(word in user_msg_lower for word in ["done", "finished", "completed"])
-        
         # Words that indicate refusal to engage further, but NOT an exit from crisis mode
         refusal_words = ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to", "no need", "leave me"]
         is_refusal = any(word in user_msg_lower for word in refusal_words) or user_msg_lower in ["no", "i don't want to"]
@@ -173,6 +163,16 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         session_state["current_step"] = next_step_index + 1 # Prepare for the next turn
         session_state["active_flow"] = "crisis_support" # Ensure it stays active
         return next_text, session_state, True
+
+    continuations = [
+        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
+        "yes please", "we can try", "i would like that", "let's do it", "let's try", 
+        "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
+        "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
+        "go ahead", "let's start", "start", "do it", "try it", "let's try it"
+    ]
+    is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
+                      any(word in user_msg_lower for word in ["done", "finished", "completed"])
 
     # --- PRIORITY 0.5: DOCTOR BOOKING FLOW ---
     is_doctor_booking_intent = intent_data.get("intent") == "Doctor Booking"
