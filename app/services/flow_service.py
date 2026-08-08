@@ -27,7 +27,7 @@ def save_session_state(user_id: int, state: dict):
         print(f"Redis Error (save): {e}")
 
 # Flows that require the user to provide specific answers/content
-INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem", "therapist_booking"]
+INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem", "therapist_booking", "doctor_booking"]
 def _get_next_booking_question(preferences: dict):
     """Determines the next question to ask in the booking flow."""
     if not preferences.get("concern"):
@@ -45,6 +45,15 @@ def _get_next_booking_question(preferences: dict):
     
     return None, None # All info gathered
 
+def _get_next_doctor_booking_question(preferences: dict):
+    """Determines the next question to ask in the doctor booking flow."""
+    if not preferences.get("concern"):
+        return "To help find the right person, could you tell me a bit more about the main health concern you're facing?", "concern"
+    
+    if not preferences.get("language"):
+        return "Do you have a preferred language for your consultation? (e.g., Malayalam, English, Hindi)", "language"
+
+    return None, None # All info gathered
 
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
@@ -141,6 +150,77 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         session_state["current_step"] = next_step_index + 1 # Prepare for the next turn
         session_state["active_flow"] = "crisis_support" # Ensure it stays active
         return next_text, session_state, True
+
+    # --- PRIORITY 0.5: DOCTOR BOOKING FLOW ---
+    is_doctor_booking_intent = intent_data.get("intent") == "Doctor Booking"
+    active_doctor_booking_flow = session_state.get("active_flow") == "doctor_booking"
+
+    if is_doctor_booking_intent and not active_doctor_booking_flow:
+        # The AI has already asked the first question. We just need to set the state.
+        session_state["active_flow"] = "doctor_booking"
+        session_state["booking_preferences"] = intent_data.get("user_preferences", {})
+        session_state["booking_step"] = "concern" # Ready to receive the answer to the concern question
+        # The AI reply from the main loop will be sent, so we return None here to not override it.
+        # But we must return flow_active=True to prevent further processing.
+        # However, the AI reply is generated *after* this call in some loops.
+        # Let's return the first question from here to be safe and consistent with the therapist flow.
+        ai_reply = intent_data.get("reply") or "Of course, I can help with that. To find the right Mibo expert, could you tell me a bit more about the main health concern you're facing?"
+        return ai_reply, session_state, True
+
+    if active_doctor_booking_flow:
+        preferences = session_state.get("booking_preferences", {})
+        booking_step = session_state.get("booking_step")
+
+        # This block handles the user's ANSWER to the previously asked question.
+        if booking_step:
+            if booking_step == "concern":
+                preferences["concern"] = user_message.strip()
+            elif booking_step == "language":
+                preferences["language"] = user_message.strip().capitalize()
+
+        # Ask the next question if needed
+        next_question, question_type = _get_next_doctor_booking_question(preferences)
+        if next_question:
+            session_state["booking_step"] = question_type
+            session_state["booking_preferences"] = preferences
+            return next_question, session_state, True
+        else:
+            # All info gathered, find an expert
+            concern = preferences.get("concern", "general medical support")
+            # For doctors, we default to finding a Psychiatrist as they are MDs
+            experts = care_navigator_service.find_experts(
+                concern=concern,
+                severity="critical", # Prioritize MDs
+                preferences=preferences,
+                role_override="Psychiatrist" # Force search for Psychiatrists
+            )
+
+            if not experts:
+                reply = (
+                    "I'm sorry, I couldn't find a doctor available for a consultation right now. "
+                    "This is unusual. I would recommend reaching out to a local medical clinic or emergency services if your concern is urgent."
+                )
+            else:
+                expert = experts[0] # Recommend the top match
+                reply = (
+                    f"Based on your concern, I'd recommend consulting with **Dr. {expert['name']}**, who is a Psychiatrist. "
+                    f"As a medical doctor, they can help assess both physical and mental health concerns.\n\n"
+                    f"Dr. {expert['name']} speaks {', '.join(expert['languages'])} and is available for {', '.join(expert['consultation_types'])} consultations.\n\n"
+                    "Would you like to book an appointment? I can guide you to the booking page in the Mibo app."
+                )
+                session_state["selected_expert"] = expert
+                session_state["booking_step"] = "doctor_recommendation_shown"
+
+            return reply, session_state, True
+
+    if session_state.get("booking_step") == "doctor_recommendation_shown":
+        if is_continuation or "book" in user_msg_lower:
+            expert_name = session_state.get("selected_expert", {}).get("name", "the doctor")
+            session_state["active_flow"] = None # End flow
+            return f"Great! To book an appointment with Dr. {expert_name}, please visit the Mibo app. I can guide you there.", session_state, True
+        else:
+            session_state["active_flow"] = None # End flow
+            return "Okay. What would you like to do instead?", session_state, True
 
     # --- PRIORITY 1: THERAPIST BOOKING FLOW ---
     is_booking_intent = intent_data.get("intent") == "Therapist Booking"

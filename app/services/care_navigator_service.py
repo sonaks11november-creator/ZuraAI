@@ -8,6 +8,10 @@ def map_concern_to_role_and_specialization(concern: str, severity: str) -> (Opti
     """
     concern_lower = concern.lower()
     
+    # New: Handle direct requests for doctors or physical symptoms
+    if any(c in concern_lower for c in ["headache", "physical", "medical", "doctor", "physician"]):
+        return "Psychiatrist", ["General Psychiatry"]
+    
     if severity in ["critical", "severe"] or any(c in concern_lower for c in ["severe depression", "suicidal", "bipolar", "schizophrenia"]):
         return "Psychiatrist", [concern]
 
@@ -32,7 +36,8 @@ def map_concern_to_role_and_specialization(concern: str, severity: str) -> (Opti
 def find_experts(
     concern: str,
     severity: str = "moderate",
-    preferences: Dict = None
+    preferences: Dict = None,
+    role_override: Optional[str] = None
 ) -> List[Dict]:
     """
     Finds and ranks suitable experts based on user's concern and preferences using a scoring model.
@@ -40,6 +45,7 @@ def find_experts(
     :param concern: The primary issue the user is facing (e.g., "Anxiety", "Relationship problems").
     :param severity: The severity of the issue ("mild", "moderate", "severe", "critical").
     :param preferences: A dict with user preferences like 'city', 'language', 'consultation_type'.
+    :param role_override: Force a search for a specific role (e.g., "Psychiatrist").
     """
     if preferences is None:
         preferences = {}
@@ -47,7 +53,7 @@ def find_experts(
     role, specializations = map_concern_to_role_and_specialization(concern, severity)
     
     if not role:
-        return []
+        role = "Clinical Psychologist" # Fallback role
 
     # --- Scoring-based matching instead of filtering ---
     scored_experts = []
@@ -55,7 +61,7 @@ def find_experts(
         # Role is a mandatory filter. A psychiatrist and psychologist are not interchangeable for certain severities.
         if expert["role"] != role:
             continue
-
+        
         score = 0
         
         # 1. Specialization Score (+50 for a primary match, +25 for a secondary one)
