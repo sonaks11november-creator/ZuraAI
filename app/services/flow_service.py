@@ -96,14 +96,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         # Step 3 onwards: Persistent supportive loop. The user cannot exit this loop.
         # Any message they send gets a supportive response, redirecting to the crisis line if needed.
-        if "expert" in user_msg_lower or "doctor" in user_msg_lower or "therapist" in user_msg_lower:
-            message = "I hear you asking for an expert, and that is a very important step. The best and fastest way to connect with a trained person right now is to call the Tele-MANAS helpline at 14416. They are available 24/7."
+        talk_to_human_keywords = ["expert", "doctor", "therapist", "someone", "person", "human", "talk"]
+        if any(keyword in user_msg_lower for keyword in talk_to_human_keywords):
+            # User is asking for help. Re-iterate the most important safety message and re-ask the danger question.
+            message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+            # Set the step so the next message is processed as an answer to the danger question.
+            session_state["current_step"] = 1
         else:
             # Use the generic "I'm still here" message from the flow.
             message = get_next_flow_step("crisis_support", 3)
-
-        # We stay in step 3.
-        session_state["current_step"] = 3
+            # We stay in step 3.
+            session_state["current_step"] = 3
         return message, session_state, True
 
     continuations = [
