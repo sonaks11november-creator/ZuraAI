@@ -133,7 +133,9 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 "crisis_mode": analysis.get("crisis_mode", False)
             }
             intent_data = {
-                "intent": analysis.get("intent", "General chat")
+                "intent": analysis.get("intent", "General chat"),
+                "risk_level": analysis.get("risk_level", "low"),
+                "user_preferences": analysis.get("user_preferences")
             }
 
             # Background tasks for DB updates

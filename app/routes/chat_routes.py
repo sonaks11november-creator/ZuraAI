@@ -255,7 +255,11 @@ async def chat(
 
     # 4. Flow Interception
     t_flow = time.time()
-    intent_data = {"intent": analysis.get("intent") or "General chat"}
+    intent_data = {
+        "intent": analysis.get("intent") or "General chat",
+        "risk_level": analysis.get("risk_level") or "low",
+        "user_preferences": analysis.get("user_preferences")
+    }
     emotion_data = {"emotion": current_emotion, "severity": severity}
     
     flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data, db=db, user_name=user_name_val)

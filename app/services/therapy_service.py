@@ -122,17 +122,11 @@ WELLNESS_FLOWS = {
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
     ], # 0
     "crisis_support": [
-        # Step 0: Immediate, direct escalation with resources. This is the first message sent when critical risk is detected.
-        "{user_name}, I’m really concerned about your immediate safety. Please don’t stay alone right now.\n\nIf you think you might hurt yourself or you have already done something to harm yourself, please seek emergency medical help immediately or ask someone you trust to take you to the nearest emergency department.\n\nIn India, you can also call Tele-MANAS at 14416, a 24/7 mental-health support service where you can speak with a trained counsellor.\n\nFor now, please move away from anything you could use to hurt yourself and stay with another person if possible.\n\nAre you in immediate danger of hurting yourself right now?",
+        # Step 0: Immediate, direct escalation. This is sent upon detection and if the user asks for an "expert".
+        "{user_name}, I’m really concerned about your safety. ZuraAI isn’t able to provide emergency care, so please get immediate human support now.\n\n🆘 Crisis Help — 24/7\nTele-MANAS: 14416\nYou can call this free 24/7 mental-health helpline and speak with a trained counsellor.\n\nIf you feel you might hurt yourself right now, please go to the nearest emergency department or contact local emergency services, and stay with someone you trust rather than being alone.\n\nI will stay here with you, but please reach out for immediate human help now.",
         
-        # Step 1: Response if user says "yes" to immediate danger.
-        "Thank you for being honest with me. It is critical that you get help right now. Please call Tele-MANAS at 14416 or have someone take you to an emergency room. I will stay here with you, but your immediate connection to human support is the most important thing. Can you let me know if you are able to make that call?",
-        
-        # Step 2: Response if user says "no" or is unsure.
-        "I'm relieved to hear you're not in immediate danger, but I know these feelings are still incredibly heavy and serious. Thank you for staying and talking with me. It takes immense strength to do that. We don't have to solve everything at once. Can we just stay here together for a bit?",
-
-        # Step 3: Gentle re-engagement after the initial safety check.
-        "I'm still here with you. We can talk about what's on your mind, or we can just sit in silence for a moment. There's no pressure. What feels right for you?"
+        # Step 1: Persistent supportive loop. Any other message gets this supportive reminder.
+        "I'm still here with you. Your safety is the most important thing. Please consider calling Tele-MANAS at 14416 or seeking emergency help. You don't have to go through this alone.",
     ],
 }
 
