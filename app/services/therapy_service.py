@@ -123,10 +123,13 @@ WELLNESS_FLOWS = {
     ], # 0
     "crisis_support": [
         # Step 0: Immediate, direct escalation. This is sent upon detection and if the user asks for an "expert".
-        "{user_name}, I’m really concerned about your safety. ZuraAI isn’t able to provide emergency care, so please get immediate human support now.\n\n🆘 Crisis Help — 24/7\nTele-MANAS: 14416\nYou can call this free 24/7 mental-health helpline and speak with a trained counsellor.\n\nIf you feel you might hurt yourself right now, please go to the nearest emergency department or contact local emergency services, and stay with someone you trust rather than being alone.\n\nI will stay here with you, but please reach out for immediate human help now.",
+        "{user_name}, I’m really concerned about your safety. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\n🆘 Crisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.\n\nYou don't need to go through the normal expert-selection questions right now. This is an emergency-support situation.",
         
         # Step 1: Persistent supportive loop. Any other message gets this supportive reminder.
-        "I'm still here with you. Your safety is the most important thing. Please consider calling Tele-MANAS at 14416 or seeking emergency help. You don't have to go through this alone.",
+        "I'm still here with you. Your safety is the most important thing. Please use the Mibo Crisis Help (24/7) option on the homepage or seek emergency help. You don't have to go through this alone.",
+
+        # Step 2: Response when user asks for an expert while in crisis.
+        "Yes. Mibo provides Crisis Help with 24/7 support. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\n🆘 Crisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.\n\nYou don't need to go through the normal expert-selection questions right now. This is an emergency-support situation."
     ],
 }
 

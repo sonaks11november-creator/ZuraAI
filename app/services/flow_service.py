@@ -76,6 +76,16 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
     # Main handler for the critical risk state:
     if session_state.get("critical_risk_active"):
+        # Deactivation check: Allow user to exit crisis mode if they explicitly state they are safe.
+        deactivation_keywords = ["i'm safe", "i am safe", "not in danger", "false alarm", "i'm okay now", "i am okay now", "feel better now"]
+        if any(keyword in user_msg_lower for keyword in deactivation_keywords):
+            session_state["critical_risk_active"] = False
+            session_state["active_flow"] = None
+            session_state["current_step"] = 0
+            reply = "I'm so relieved to hear that you're feeling safer now. Thank you for telling me. I'm still here to support you. What would you like to do next?"
+            # The rest of the user's message (e.g., "I want to book a psychologist") will be processed in the next turn.
+            return reply, session_state, True
+
         user_name_for_flow = user_name or session_state.get("user_name", "there")
         current_step = session_state.get("current_step", 0)
 
@@ -85,11 +95,12 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["current_step"] = 1 # Move to the persistent loop state
             return message, session_state, True
 
-        # After the initial message, any request for a human ("expert", "doctor", etc.) should re-trigger the main escalation message.
+        # After the initial message, any request for a human ("expert", "doctor", etc.) should use the specific crisis-expert response.
         talk_to_human_keywords = ["expert", "doctor", "therapist", "someone", "person", "human", "talk", "help"]
         if any(keyword in user_msg_lower for keyword in talk_to_human_keywords):
-            message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
-            session_state["current_step"] = 1 # Stay in the loop, but re-escalate
+            # Use the new step 2 for this specific case.
+            message = get_next_flow_step("crisis_support", 2)
+            session_state["current_step"] = 1 # Stay in the loop
             return message, session_state, True
 
         # For any other user message, provide the persistent supportive reminder.
