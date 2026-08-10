@@ -48,7 +48,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
 
             intent_data = {} # Initialize to prevent NameError on first pass
             # 2. Flow Orchestration (Priority 1)
-            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
+            flow_reply, session_state, flow_active, pending_intent_from_crisis = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
             
             if flow_active:
                 # Track exercise completion if a flow just finished
@@ -146,7 +146,12 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 user_name = user.name
 
             # Re-run flow logic now that we have AI analysis to detect pivots, greetings, or crisis
-            flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
+            # If there was a pending intent from a resolved crisis, override the AI's detected intent
+            if pending_intent_from_crisis:
+                intent_data["intent"] = pending_intent_from_crisis["intent"]
+                intent_data["user_preferences"] = pending_intent_from_crisis["user_preferences"]
+                print(f"DEBUG: Overriding AI intent with pending crisis intent: {intent_data['intent']}")
+            flow_reply, session_state, flow_active, _ = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
 
             if flow_active and flow_reply:
                 # This block will now be entered if a crisis is detected and the flow is activated.
