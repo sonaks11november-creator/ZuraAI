@@ -74,6 +74,23 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
 
+    # Define is_continuation early, as it's used in crisis flow logic
+    continuations = [
+        "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
+        "yes please", "we can try", "i would like that", "let's do it", "let's try",
+        "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
+        "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
+        "go ahead", "let's start", "start", "do it", "try it", "let's try it"
+    ]
+    is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
+                      any(word in user_msg_lower for word in ["done", "finished", "completed"])
+
+    # --- PRIORITY 0.0: CRISIS RESOLUTION CHECK (from previous turn) ---
+    if session_state.get("crisis_state", {}).get("status") == CRISIS_STATUS_RESOLVED:
+        session_state["crisis_state"] = {} # Clear the crisis state
+        session_state["active_flow"] = None # Ensure active_flow is also cleared
+        # Do NOT return True here. Let the message fall through to other flow logic.
+
     # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
     # Activation:
@@ -144,8 +161,8 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         # Check for "help contacted"
         contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to", "i reached out"]
-        if any(keyword in user_msg_lower for keyword in contacted_keywords):
-            crisis_state["help_contacted"] = True
+        if any(keyword in user_msg_lower for keyword in contacted_keywords) and crisis_state.get("status") != CRISIS_STATUS_HELP_CONTACTED:
+            crisis_state["status"] = CRISIS_STATUS_HELP_CONTACTED
             session_state["crisis_state"] = crisis_state
             message = get_next_flow_step("crisis_support", 4)
             if message:
