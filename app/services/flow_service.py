@@ -28,29 +28,39 @@ def save_session_state(user_id: int, state: dict):
 
 # Flows that require the user to provide specific answers/content
 INTERACTIVE_FLOWS = ["grounding", "thought_reframing", "self_esteem", "therapist_booking", "doctor_booking"]
+
+# Crisis Flow States
+CRISIS_STATUS_DETECTED = "CRISIS_DETECTED"
+CRISIS_STATUS_HELP_SHOWN = "CRISIS_HELP_SHOWN"
+CRISIS_STATUS_HELP_UNAVAILABLE = "CRISIS_HELP_UNAVAILABLE"
+CRISIS_STATUS_HELP_CONTACTED = "CRISIS_HELP_CONTACTED"
+CRISIS_STATUS_SAFETY_CHECK = "CRISIS_SAFETY_CHECK"
+CRISIS_STATUS_IMMEDIATE_DANGER = "CRISIS_IMMEDIATE_DANGER"
+CRISIS_STATUS_RESOLVED = "CRISIS_RESOLVED"
+
 def _get_next_booking_question(preferences: dict):
     """Determines the next question to ask in the booking flow."""
     if not preferences.get("concern"):
         return "What would you like support with today?\n\n• Stress\n• Anxiety\n• Depression\n• Relationship concerns\n• Something else", "concern"
-    
+
     consultation_type = preferences.get("consultation_type")
     if not consultation_type:
         return "Would you prefer:\n\n• Online consultation\n• In-person consultation", "consultation_type"
-    
+
     if not preferences.get("language"):
         return "Do you have a preferred language for your consultation? (e.g., Malayalam, English, Hindi)", "language"
-    
+
     if consultation_type == "In-person" and not preferences.get("city"):
         return "Which Mibo location would you prefer?\n\n• Kochi\n• Bengaluru\n• Mumbai", "city"
-    
+
     return None, None # All info gathered
 
 def _get_next_doctor_booking_question(preferences: dict):
     """Determines the next question to ask in the doctor booking flow."""
     if not preferences.get("concern"):
         return "To help find the right person, could you tell me a bit more about the main health concern you're facing?", "concern"
-    
-    if not preferences.get("language"):
+
+    if not preferences.get("language") and preferences.get("concern"): # Only ask language after concern
         return "Do you have a preferred language for your consultation? (e.g., Malayalam, English, Hindi)", "language"
 
     return None, None # All info gathered
@@ -66,20 +76,15 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
     # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
-
     # Activation:
     is_critical_risk_signal = intent_data.get("risk_level") == "critical"
-    if is_critical_risk_signal and not session_state.get("crisis_state", {}).get("active"):
+    if is_critical_risk_signal and session_state.get("crisis_state", {}).get("status") not in [CRISIS_STATUS_DETECTED, CRISIS_STATUS_HELP_SHOWN, CRISIS_STATUS_HELP_UNAVAILABLE, CRISIS_STATUS_HELP_CONTACTED, CRISIS_STATUS_SAFETY_CHECK, CRISIS_STATUS_IMMEDIATE_DANGER]:
         session_state["crisis_state"] = {
-            "active": True,
-            "help_shown": False,
-            "help_unavailable": False,
-            "help_contacted": False,
+            "status": CRISIS_STATUS_DETECTED,
         }
         session_state["active_flow"] = "crisis_support" # Prioritizes this flow
 
-    # Main handler for the critical risk state:
-    if session_state.get("crisis_state", {}).get("active"):
+    if session_state.get("active_flow") == "crisis_support":
         crisis_state = session_state["crisis_state"]
         user_name_for_flow = user_name or session_state.get("user_name", "there")
 
@@ -96,8 +101,8 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # A simple "no" is a strong danger signal after we ask "Are you safe?"
         is_immediate_danger = any(phrase in user_msg_lower for phrase in IMMEDIATE_DANGER_PHRASES) or "no" == user_msg_lower
 
-        if crisis_state.get("help_contacted") and is_immediate_danger:
-            crisis_state["immediate_danger"] = True
+        # Highest priority: Immediate danger detection
+        if is_immediate_danger and crisis_state.get("status") != CRISIS_STATUS_IMMEDIATE_DANGER:
             session_state["crisis_state"] = crisis_state
             message = get_next_flow_step("crisis_support", 5)
             if message:
@@ -109,17 +114,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             return message, session_state, True
 
         # Deactivation check:
-        deactivation_keywords = ["i'm safe", "i am safe", "not in danger", "false alarm", "i'm okay now", "i am okay now", "feel better now"]
+        deactivation_keywords = ["i'm safe", "i am safe", "not in danger", "false alarm", "i'm okay now", "i am okay now", "feel better now", "i'm fine now"]
         if any(keyword in user_msg_lower for keyword in deactivation_keywords):
-            session_state["crisis_state"] = {"active": False} # Reset state
+            session_state["crisis_state"] = {"status": CRISIS_STATUS_RESOLVED} # Reset state
             session_state["active_flow"] = None
-            reply = "I'm so relieved to hear that you're feeling safer now. Thank you for telling me. I'm still here to support you. What would you like to do next?"
+            reply = "I'm so relieved to hear that you're feeling safer now. Thank you for letting me know. I'm still here to support you. What would you like to do next?"
             return reply, session_state, True
 
         # Check for "help unavailable"
         unavailable_keywords = ["not available", "isn't available", "not working", "unavailable"]
-        if any(keyword in user_msg_lower for keyword in unavailable_keywords):
-            crisis_state["help_unavailable"] = True
+        if any(keyword in user_msg_lower for keyword in unavailable_keywords) and crisis_state.get("status") != CRISIS_STATUS_HELP_UNAVAILABLE:
+            crisis_state["status"] = CRISIS_STATUS_HELP_UNAVAILABLE
             session_state["crisis_state"] = crisis_state
             message = get_next_flow_step("crisis_support", 3)
             if message is None:
@@ -130,10 +135,15 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     "or contact emergency services immediately. You can also call Tele-MANAS at 14416 for immediate "
                     "mental-health support in India."
                 )
-            return message, session_state, True
+            return message, session_state, True # This is the message for "help unavailable"
+        elif crisis_state.get("status") == CRISIS_STATUS_HELP_UNAVAILABLE and is_continuation:
+            crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+            session_state["crisis_state"] = crisis_state
+            return "You're welcome. I'm glad you told me what happened. Are you safe right now?", session_state, True
+
 
         # Check for "help contacted"
-        contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to"]
+        contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to", "i reached out"]
         if any(keyword in user_msg_lower for keyword in contacted_keywords):
             crisis_state["help_contacted"] = True
             session_state["crisis_state"] = crisis_state
@@ -148,26 +158,43 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     "please continue with emergency support.\n\nAre you safe right now?"
                 )
             return message, session_state, True
+        elif crisis_state.get("status") == CRISIS_STATUS_HELP_CONTACTED and is_continuation:
+            crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+            session_state["crisis_state"] = crisis_state
+            return "I'm glad you reached out. Are you safe right now?", session_state, True
 
-        # If help has been shown, but user says something generic or asks for an expert
-        if crisis_state.get("help_shown"):
+        # Handle SAFETY_CHECK state
+        if crisis_state.get("status") == CRISIS_STATUS_SAFETY_CHECK:
+            if user_msg_lower == "yes":
+                session_state["crisis_state"] = {"status": CRISIS_STATUS_RESOLVED}
+                session_state["active_flow"] = None
+                reply = "That's a huge relief. What would you like to do next?"
+                return reply, session_state, True
+            else: # If not "yes", re-ask or provide supportive message
+                return "Your safety is my top priority. Are you safe right now?", session_state, True
+
+        # Initial Escalation (if status is DETECTED)
+        if crisis_state.get("status") == CRISIS_STATUS_DETECTED:
+            message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+            crisis_state["status"] = CRISIS_STATUS_HELP_SHOWN
+            session_state["crisis_state"] = crisis_state
+            return message, session_state, True
+
+        # If status is CRISIS_STATUS_HELP_SHOWN (after initial message)
+        if crisis_state.get("status") == CRISIS_STATUS_HELP_SHOWN:
             # If user asks for an expert, repeat the crisis help message with the expert context.
             talk_to_human_keywords = ["expert", "doctor", "therapist", "someone", "person", "human", "talk", "help"]
             if any(keyword in user_msg_lower for keyword in talk_to_human_keywords):
                 message = get_next_flow_step("crisis_support", 2)
                 return message, session_state, True
-            
+
             # For generic replies ("ok", "no need to show again"), give the supportive follow-up.
             # This prevents repeating the large initial message.
-            message = get_next_flow_step("crisis_support", 1)
-            return message, session_state, True
+            if is_continuation:
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK # Move to safety check after initial ack
+                session_state["crisis_state"] = crisis_state
+                return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True
 
-        # Initial Escalation (if help_shown is False)
-        if not crisis_state.get("help_shown"):
-            message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
-            crisis_state["help_shown"] = True
-            session_state["crisis_state"] = crisis_state
-            return message, session_state, True
 
         # Fallback (should not be reached if logic is correct, but good for safety)
         message = get_next_flow_step("crisis_support", 1)
@@ -175,7 +202,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
     continuations = [
         "ok", "okay", "yes", "yeah", "sure", "done", "next", "continue", "go on",
-        "yes please", "we can try", "i would like that", "let's do it", "let's try", 
+        "yes please", "we can try", "i would like that", "let's do it", "let's try",
         "yep", "yup", "give", "i did it", "did it", "done it", "i do it", "completed", "ready",
         "anything", "whatever", "help me", "calm down", "want to calm down", "i want to calm down",
         "go ahead", "let's start", "start", "do it", "try it", "let's try it"
@@ -351,7 +378,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                         if expert['name'].lower() in user_msg_lower:
                             chosen_expert = expert
                             break
-                
+
                 if chosen_expert:
                     session_state["selected_expert"] = chosen_expert
                     profile_reply = (
@@ -368,14 +395,14 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
                     reply = "I'm sorry, I didn't recognize that choice. Please select an expert from the list by name or number:\n\n" + "\n".join(expert_names)
                     return reply, session_state, True
-            
+
             elif question_type == "profile_shown":
                 selected_expert = session_state.get("selected_expert", {})
                 if not selected_expert: # Safety check
                     session_state["active_flow"] = None
                     return "Something went wrong, let's start over.", session_state, True
-                
-                if "fee" in user_msg_lower or "fees" in user_msg_lower or "how much" in user_msg_lower:
+
+                if any(w in user_msg_lower for w in ["fee", "fees", "how much", "cost"]):
                     fee = selected_expert.get("fee", "₹1500 per session") # Mock fee for demonstration
                     reply = f"The consultation fee for {selected_expert['name']} is {fee}. Would you like to book an appointment?"
                     session_state["booking_step"] = "fee_shown"
@@ -418,7 +445,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     # If they ask something else, let the AI handle it by ending the flow.
                     session_state["active_flow"] = None
                     return None, session_state, False
-
+            
             answer = user_msg_lower
             
             if question_type == "concern":
@@ -455,7 +482,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             if not is_continuation: # User said "no" or something else
                 session_state["active_flow"] = None
                 return "Okay, no problem. What would you like to do instead?", session_state, True
-        
+
         # Step 3: Collect missing information by asking the next question
         next_question, question_type = _get_next_booking_question(preferences)
 
@@ -494,7 +521,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     rec_points = []
                     expert_specs_lower = {s.lower() for s in expert["specializations"]}
                     matches = mapped_specs.intersection(expert_specs_lower)
-                    
+
                     if matches:
                         display_matches = [s.title().replace("Cbt", "CBT").replace("Dbt", "DBT") for s in matches]
                         rec_points.append(f"• Supports with {', '.join(display_matches[:2])} and emotional well-being")
@@ -502,7 +529,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                         rec_points.append(f"• Experienced in {expert['specializations'][0]}")
 
                     # Consultation type
-                    if preferences.get("consultation_type") in expert["consultation_types"]:
+                    if preferences.get("consultation_type") and preferences.get("consultation_type") in expert["consultation_types"]:
                         rec_points.append(f"• Available for {preferences['consultation_type'].lower()} consultations")
 
                     # Language
@@ -527,7 +554,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["active_flow"] = "therapist_booking"
             session_state["booking_step"] = "recommendations_shown"
             session_state["recommended_experts"] = experts
-            return final_reply, session_state, True
+            return final_reply, session_state, True # This is the reply for therapist booking recommendations
 
     # --- NEW: Decline handling for pending flows ---
     is_decline = user_msg_lower in ["no", "no thanks", "not now"]
@@ -541,7 +568,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             if pending_flow not in refused:
                 refused.append(pending_flow)
             session_state["refused_exercises"] = refused
-
+        
         # Reset confirmation state so we don't get stuck here
         session_state["awaiting_confirmation"] = False
         session_state["pending_flow"] = None
@@ -562,10 +589,10 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     # 1. Basic Intent/Stop/Pivot Detection
     greetings = ["hi", "hello", "hey", "hii", "howdy", "sup", "greetings", "good morning", "good evening", "good afternoon"]
     
-    # Check for greeting (either AI detected or keyword matched)
+    # Check for greeting (either AI detected or keyword matched) - make sure it's not a continuation
     has_greeting_word = any(word == user_msg_lower or user_msg_lower.startswith(word + " ") for word in greetings)
-    is_greeting = (intent_data.get("emotion") == "neutral" and has_greeting_word) or (has_greeting_word and len(user_msg_lower) < 10)
-    
+    is_greeting = (not is_continuation) and ((intent_data.get("emotion") == "neutral" and has_greeting_word) or (has_greeting_word and len(user_msg_lower) < 10))
+
     # Emotional Pivot Detection: Only pivot if NOT a simple continuation
     is_explicit_emotion = any(phrase in user_msg_lower for phrase in ["i feel", "i'm feeling", "i am feeling", "feeling really", "feeling so"])
     emotion = emotion_data.get("emotion", "neutral")
@@ -578,7 +605,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         session_state["pending_flow"] = None
         session_state["active_flow"] = None
         session_state["active_assessment"] = None
-        session_state["awaiting_escalation"] = False
         session_state["current_step"] = 0
         session_state["last_exercise"] = None
         return None, session_state, False
@@ -596,7 +622,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         session_state["active_assessment"] = None
         session_state["pending_flow"] = None
         session_state["awaiting_confirmation"] = False
-        session_state["awaiting_escalation"] = False
         session_state["current_step"] = 0
         return "Of course. We can stop here. What would you like to do instead?", session_state, True
 
@@ -610,7 +635,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # Try to parse numeric (0-3) or letter (A-D) answer
         match = re.search(r"\b([0-3a-dA-D])\b", user_msg_lower)
         if match:
-            raw_answer = match.group(1).upper()
+            raw_answer = match.group(1).upper() # Ensure raw_answer is uppercase for 'A'-'D'
             
             # Handle emergency override for onboarding Q3
             if active_assessment == "onboarding" and current_step == 2 and raw_answer == 'D':
@@ -619,7 +644,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["critical_risk_active"] = True
                 session_state["active_flow"] = "crisis_support"
                 session_state["current_step"] = 0 # Start the crisis flow from the beginning
-
+                
                 # Return the first message of the crisis flow directly.
                 user_name_for_flow = user_name or session_state.get("user_name", "there")
                 escalation_message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
@@ -643,7 +668,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["assessment_score"] = total_score
                 session_state["assessment_answers"] = assessment_answers
                 
-                # Special empathy touches for onboarding
+                # Special empathy touches for onboarding (after Q4, before Q5)
                 if active_assessment == "onboarding":
                     if current_step == 4: # After Q4, before Q5
                         next_question = "Thanks for being honest. Almost done.\n\n" + next_question
@@ -856,6 +881,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["active_flow"] = None
             session_state["current_step"] = 0
             session_state["media_session_active"] = False 
-            return None, session_state, False
+            return None, session_state, False # Flow finished, let AI take over
 
     return None, session_state, False
