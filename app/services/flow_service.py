@@ -97,6 +97,14 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             crisis_state["help_unavailable"] = True
             session_state["crisis_state"] = crisis_state
             message = get_next_flow_step("crisis_support", 3)
+            if message is None:
+                # Fallback message if the flow step is missing
+                message = (
+                    "I'm glad you told me. If Mibo Crisis Help isn't available right now, please don't wait for it. "
+                    "If you might hurt yourself, stay with someone you trust and go to the nearest emergency department "
+                    "or contact emergency services immediately. You can also call Tele-MANAS at 14416 for immediate "
+                    "mental-health support in India."
+                )
             return message, session_state, True
 
         # Check for "help contacted"
@@ -104,7 +112,16 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         if any(keyword in user_msg_lower for keyword in contacted_keywords):
             crisis_state["help_contacted"] = True
             session_state["crisis_state"] = crisis_state
-            message = get_next_flow_step("crisis_support", 4).replace("{user_name}", user_name_for_flow)
+            message = get_next_flow_step("crisis_support", 4)
+            if message:
+                message = message.replace("{user_name}", user_name_for_flow)
+            else:
+                # Fallback message if the flow step is missing
+                message = (
+                    f"I'm glad you reached out for help, {user_name_for_flow}. Please stay with the person or support service "
+                    "you've contacted and avoid being alone right now. If you're still in immediate danger, "
+                    "please continue with emergency support.\n\nAre you safe right now?"
+                )
             return message, session_state, True
 
         # If help has been shown, but user says something generic or asks for an expert
