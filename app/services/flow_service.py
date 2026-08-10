@@ -83,6 +83,31 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         crisis_state = session_state["crisis_state"]
         user_name_for_flow = user_name or session_state.get("user_name", "there")
 
+        # --- PRIORITY 0.1: IMMEDIATE DANGER (Post-Contact Escalation) ---
+        # This is the highest priority check *within* an active crisis. It triggers if a user
+        # indicates they are not safe *after* we've already asked them about their safety.
+        IMMEDIATE_DANGER_PHRASES = [
+            "i'm not safe", "i am not safe", "no i'm not safe", "not safe",
+            "i'm alone", "i am alone", "always alone",
+            "this is my last message", "last message", "last messgase", # Includes user typo
+            "goodbye", "good bye", "goodby",
+            "i can't go on", "no point", "end it all"
+        ]
+        # A simple "no" is a strong danger signal after we ask "Are you safe?"
+        is_immediate_danger = any(phrase in user_msg_lower for phrase in IMMEDIATE_DANGER_PHRASES) or "no" == user_msg_lower
+
+        if crisis_state.get("help_contacted") and is_immediate_danger:
+            crisis_state["immediate_danger"] = True
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 5)
+            if message:
+                message = message.replace("{user_name}", user_name_for_flow)
+            else: # Hardcoded fallback for maximum safety
+                message = (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
+                           "Move to a place where other people are present and contact emergency support immediately. "
+                           "If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help.")
+            return message, session_state, True
+
         # Deactivation check:
         deactivation_keywords = ["i'm safe", "i am safe", "not in danger", "false alarm", "i'm okay now", "i am okay now", "feel better now"]
         if any(keyword in user_msg_lower for keyword in deactivation_keywords):
