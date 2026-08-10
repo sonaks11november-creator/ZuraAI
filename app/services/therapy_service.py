@@ -122,14 +122,20 @@ WELLNESS_FLOWS = {
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
     ], # 0
     "crisis_support": [
-        # Step 0: Immediate, direct escalation. This is sent upon detection and if the user asks for an "expert".
+        # 0: Initial Escalation
         "{user_name}, I’m really concerned about your safety. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\n🆘 Crisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.\n\nYou don't need to go through the normal expert-selection questions right now. This is an emergency-support situation.",
         
-        # Step 1: Persistent supportive loop. Any other message gets this supportive reminder.
+        # 1: Persistent Supportive Loop (if help not contacted/unavailable)
         "I'm still here with you. Your safety is the most important thing. Please use the Mibo Crisis Help (24/7) option on the homepage or seek emergency help. You don't have to go through this alone.",
 
-        # Step 2: Response when user asks for an expert while in crisis.
+        # 2: Response when user asks for an expert while in crisis
         "Yes. Mibo provides Crisis Help with 24/7 support. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\n🆘 Crisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.\n\nYou don't need to go through the normal expert-selection questions right now. This is an emergency-support situation."
+
+        # 3: Fallback for when Mibo Crisis Help is unavailable
+        "I'm glad you told me. If Mibo Crisis Help isn't available right now, please don't wait for it. If you might hurt yourself, stay with someone you trust and go to the nearest emergency department or contact emergency services immediately. You can also call Tele-MANAS at 14416 for immediate mental-health support in India.",
+
+        # 4: Follow-up for when user has contacted help
+        "I'm glad you reached out for help, {user_name}. Please stay with the person or support service you've contacted and avoid being alone right now. If you're still in immediate danger, please continue with emergency support.\n\nAre you safe right now?"
     ],
 }
 

@@ -69,43 +69,66 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
     # Activation:
     is_critical_risk_signal = intent_data.get("risk_level") == "critical"
-    if is_critical_risk_signal and not session_state.get("critical_risk_active"):
-        session_state["critical_risk_active"] = True
-        session_state["active_flow"] = "crisis_support"
-        session_state["current_step"] = 0
+    if is_critical_risk_signal and not session_state.get("crisis_state", {}).get("active"):
+        session_state["crisis_state"] = {
+            "active": True,
+            "help_shown": False,
+            "help_unavailable": False,
+            "help_contacted": False,
+        }
+        session_state["active_flow"] = "crisis_support" # Prioritizes this flow
 
     # Main handler for the critical risk state:
-    if session_state.get("critical_risk_active"):
-        # Deactivation check: Allow user to exit crisis mode if they explicitly state they are safe.
+    if session_state.get("crisis_state", {}).get("active"):
+        crisis_state = session_state["crisis_state"]
+        user_name_for_flow = user_name or session_state.get("user_name", "there")
+
+        # Deactivation check:
         deactivation_keywords = ["i'm safe", "i am safe", "not in danger", "false alarm", "i'm okay now", "i am okay now", "feel better now"]
         if any(keyword in user_msg_lower for keyword in deactivation_keywords):
-            session_state["critical_risk_active"] = False
+            session_state["crisis_state"] = {"active": False} # Reset state
             session_state["active_flow"] = None
-            session_state["current_step"] = 0
             reply = "I'm so relieved to hear that you're feeling safer now. Thank you for telling me. I'm still here to support you. What would you like to do next?"
-            # The rest of the user's message (e.g., "I want to book a psychologist") will be processed in the next turn.
             return reply, session_state, True
 
-        user_name_for_flow = user_name or session_state.get("user_name", "there")
-        current_step = session_state.get("current_step", 0)
+        # Check for "help unavailable"
+        unavailable_keywords = ["not available", "isn't available", "not working", "unavailable"]
+        if any(keyword in user_msg_lower for keyword in unavailable_keywords):
+            crisis_state["help_unavailable"] = True
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 3)
+            return message, session_state, True
 
-        # Step 0: Initial Escalation. This is sent ONCE upon detection.
-        if current_step == 0:
+        # Check for "help contacted"
+        contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to"]
+        if any(keyword in user_msg_lower for keyword in contacted_keywords):
+            crisis_state["help_contacted"] = True
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 4).replace("{user_name}", user_name_for_flow)
+            return message, session_state, True
+
+        # If help has been shown, but user says something generic or asks for an expert
+        if crisis_state.get("help_shown"):
+            # If user asks for an expert, repeat the crisis help message with the expert context.
+            talk_to_human_keywords = ["expert", "doctor", "therapist", "someone", "person", "human", "talk", "help"]
+            if any(keyword in user_msg_lower for keyword in talk_to_human_keywords):
+                message = get_next_flow_step("crisis_support", 2)
+                return message, session_state, True
+            
+            # For generic replies ("ok", "no need to show again"), give the supportive follow-up.
+            # This prevents repeating the large initial message.
+            message = get_next_flow_step("crisis_support", 1)
+            return message, session_state, True
+
+        # Initial Escalation (if help_shown is False)
+        if not crisis_state.get("help_shown"):
             message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
-            session_state["current_step"] = 1 # Move to the persistent loop state
+            crisis_state["help_shown"] = True
+            session_state["crisis_state"] = crisis_state
             return message, session_state, True
 
-        # After the initial message, any request for a human ("expert", "doctor", etc.) should use the specific crisis-expert response.
-        talk_to_human_keywords = ["expert", "doctor", "therapist", "someone", "person", "human", "talk", "help"]
-        if any(keyword in user_msg_lower for keyword in talk_to_human_keywords):
-            # Use the new step 2 for this specific case.
-            message = get_next_flow_step("crisis_support", 2)
-            session_state["current_step"] = 1 # Stay in the loop
-            return message, session_state, True
-
-        # For any other user message, provide the persistent supportive reminder.
+        # Fallback (should not be reached if logic is correct, but good for safety)
         message = get_next_flow_step("crisis_support", 1)
-        session_state["current_step"] = 1 # Stay in the loop
         return message, session_state, True
 
     continuations = [
