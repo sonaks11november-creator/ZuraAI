@@ -3,12 +3,6 @@ from app.config import OPENAI_API_KEY
 import asyncio
 import json
 
-# Debug print to verify which key is being used
-if OPENAI_API_KEY:
-    print(f"DEBUG: Using OpenAI API Key ending in: ...{OPENAI_API_KEY[-4:]}")
-else:
-    print("DEBUG: No OpenAI API Key found in environment!")
-
 client = AsyncOpenAI(
     api_key=OPENAI_API_KEY
 )
