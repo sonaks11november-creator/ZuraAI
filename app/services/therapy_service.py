@@ -122,23 +122,40 @@ WELLNESS_FLOWS = {
         "I'm glad we could take this moment. How are you feeling now compared to before we started?"
     ], # 0
     "crisis_support": [
-        # 0: Initial Escalation
-        "{user_name}, I’m really concerned about your safety. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\nCrisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.",
+        # 0: Initial Escalation (CRISIS_SUICIDAL_INTENT)
+        "{user_name}, I'm really concerned about your safety. Because you said you want to end your life, please get immediate human help now.\n\n"
+        "🆘 **Crisis Help — 24/7**\n"
+        "• **Mibo Crisis Help** — Open the Mibo homepage and select “Crisis Help (24/7)”.\n\n"
+        "🚨 **Emergency**\n"
+        "• If you may hurt yourself right now, call **112** or go to the nearest emergency department.\n"
+        "• Please move somewhere other people are present and ask someone you trust to stay with you.\n\n"
+        "📞 **Mental-health support**\n"
+        "• **Tele-MANAS: 14416** — 24/7 mental-health support in India.\n\n"
+        "You don't need to go through the normal ZuraAI conversation right now.",
         
         # 1: Persistent Supportive Loop (if help not contacted/unavailable)
-        "I'm still here with you. Your safety is the most important thing. Please use the Mibo Crisis Help (24/7) option on the homepage or seek emergency help. You don't have to go through this alone.",
+        "I'm still here with you. Your safety is the most important thing. Please use one of the resources I shared. You don't have to go through this alone.",
 
-        # 2: Response when user asks for an expert while in crisis
-        "Yes. Mibo provides Crisis Help with 24/7 support. Since you’ve told me you want to end your life, please use Mibo’s Crisis Help option now to connect with immediate support.\n\nCrisis Help — 24/7\nPlease open the Mibo homepage → Crisis Help (24/7) and contact the available crisis-support service.\n\nIf you feel you may hurt yourself right now, do not stay alone. Go to the nearest emergency department or contact local emergency services, and stay with someone you trust.",
+        # 2: Dedicated Emergency Contact Info (CRISIS_EMERGENCY_CONTACT)
+        "🚨 **Emergency support**\n\n"
+        "If you are in immediate danger, call **112** now or go to the nearest emergency department.\n\n"
+        "If you can, move to a place where other people are present and ask someone you trust to stay with you.\n\n"
+        "For 24/7 mental-health support in India:\n"
+        "📞 **Tele-MANAS: 14416**\n\n"
+        "You can also use Mibo's Crisis Help (24/7) option from the Mibo homepage.",
 
-        # 3: Fallback for when Mibo Crisis Help is unavailable
-        "I'm glad you told me. If Mibo Crisis Help isn't available right now, please don't wait for it. If you might hurt yourself, stay with someone you trust and go to the nearest emergency department or contact emergency services immediately. You can also call Tele-MANAS at 14416 for immediate mental-health support in India.",
+        # 3: Fallback for when Mibo Crisis Help is unavailable (CRISIS_HELP_UNAVAILABLE)
+        "I'm glad you told me. If Mibo Crisis Help isn't available, please don't wait. Your safety is the priority.\n\n"
+        "🚨 **Emergency**\n"
+        "• If you may hurt yourself right now, call **112** or go to the nearest emergency department.\n\n"
+        "📞 **Mental-health support**\n"
+        "• **Tele-MANAS: 14416** — 24/7 mental-health support in India.",
 
-        # 4: Follow-up for when user has contacted help
-        "I'm glad you reached out for help, {user_name}. Please stay with the person or support service you've contacted and avoid being alone right now. If you're still in immediate danger, please continue with emergency support.\n\nAre you safe right now?",
+        # 4: Follow-up for when user has contacted help (CRISIS_SUPPORT_CONTACTED)
+        "I'm so glad you reached out for help, {user_name}. Please stay with the person or support service you've contacted and avoid being alone right now. If you're still in immediate danger, please continue with emergency support.\n\nAre you safe right now?",
 
-        # 5: Immediate Danger Response (Post-Contact Escalation)
-        "Thank you for telling me. Because you’re not safe right now, please get immediate human help. If you may hurt yourself, contact your local emergency service or go to the nearest emergency department now. Move to a place where other people are present and ask someone you trust to stay with you. {mibocrisis_availability_message}"
+        # 5: Immediate Danger Response (CRISIS_IMMEDIATE_DANGER / "no" to safety check)
+        "Thank you for telling me. Because you’re not safe right now, please get immediate human help. If you may hurt yourself, contact your local emergency service (**112**) or go to the nearest emergency department now. Move to a place where other people are present and ask someone you trust to stay with you. {mibocrisis_availability_message}"
     ],
 }
 
