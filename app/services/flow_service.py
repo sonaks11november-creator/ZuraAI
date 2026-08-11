@@ -95,6 +95,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     # Initialize pending intent to process after crisis resolution
     pending_intent_to_process = None
 
+    message = None # Initialize message to None
     # --- PRIORITY 0.0: CRISIS RESOLUTION CHECK (from previous turn) ---
     # If the crisis was resolved in the *previous* turn, clear the state and potentially re-process a pending intent.
     if session_state.get("crisis_state", {}).get("status") == CRISIS_STATUS_RESOLVED:
@@ -182,10 +183,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             crisis_state["status"] = CRISIS_STATUS_IMMEDIATE_DANGER
             session_state["crisis_state"] = crisis_state
             message_template = get_next_flow_step("crisis_support", 5)
-            if message:
-                message = message.replace("{user_name}", user_name_for_flow)
-            else: # Hardcoded fallback for maximum safety
-                message = (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
+            message = message_template.replace("{user_name}", user_name_for_flow) if message_template else (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
                            "Move to a place where other people are present and contact emergency support immediately. "
                            "If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help.")
             return message, session_state, True, None
@@ -194,10 +192,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         unavailable_keywords = ["not available", "isn't available", "not working", "unavailable"]
         if any(keyword in user_msg_lower for keyword in unavailable_keywords) and current_crisis_status != CRISIS_STATUS_HELP_UNAVAILABLE:
             crisis_state["status"] = CRISIS_STATUS_HELP_UNAVAILABLE
-            if is_explicit_safety_confirmation:
-                # This path is handled by PRIORITY 0.2, so we just let it fall through
-                pass
-            elif is_continuation: # User said "ok", "no need", etc. after immediate danger message
+            if is_continuation: # User said "ok", "no need", etc. after immediate danger message
                 crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
                 session_state["crisis_state"] = crisis_state
                 return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
@@ -205,8 +200,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             else:
                 message = get_next_flow_step("crisis_support", 5)
                 if message:
-                    message = message.replace("{user_name}", user_name_for_flow)
-                    
+                    message = message.replace("{user_name}", user_name_for_flow) # Ensure message is assigned here
                     mibocrisis_available = True # In a real system, this would be a dynamic check
                     mibocrisis_msg = "If Mibo Crisis Help is unavailable, please use the emergency options below." if not mibocrisis_available else ""
                     message = message.replace("{mibocrisis_availability_message}", mibocrisis_msg)
@@ -217,10 +211,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                         if contact_info_list:
                             message += "\n\nHere are some emergency contacts:\n" + "\n".join(contact_info_list)
 
-                    # Add a prompt to ask for specific help if they need it
-                    message += "\n\nIf you need help contacting emergency services, please tell me."
-
-                else: # Hardcoded fallback for maximum safety
+                else: # Fallback for maximum safety if get_next_flow_step returns None
                     message = (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
                                "Move to a place where other people are present and contact emergency support immediately. "
                                "If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help.")
@@ -266,7 +257,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["crisis_state"] = crisis_state
                 return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
             else:
-                # Repeat the immediate danger message
+                # Repeat the immediate danger message (ensure message is assigned)
                 message = get_next_flow_step("crisis_support", 5).replace("{user_name}", user_name_for_flow)
                 return message, session_state, True, None
 
@@ -287,7 +278,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["crisis_state"] = crisis_state
             return "You're welcome. I'm glad you told me what happened. Are you safe right now?", session_state, True, None
 
-        if current_crisis_status == CRISIS_STATUS_HELP_CONTACTED and is_continuation:
+        if current_crisis_status == CRISIS_STATUS_HELP_CONTACTED and is_continuation: # Ensure message is assigned
             crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
             session_state["crisis_state"] = crisis_state
             return "I'm glad you reached out. Are you safe right now?", session_state, True, None
@@ -297,14 +288,14 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
                 session_state["crisis_state"] = crisis_state
                 return "Thank you. Are you safe right now?", session_state, True, None
-            # If not a continuation, and not a safety confirmation, re-iterate and ask for safety
+            # If not a continuation, and not a safety confirmation, re-iterate and ask for safety (ensure message is assigned)
             return get_next_flow_step("crisis_support", 2), session_state, True, None # Repeat the emergency info
 
         if current_crisis_status == CRISIS_STATUS_HELP_SHOWN:
             if is_continuation:
                 crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK # Move to safety check after initial ack
                 session_state["crisis_state"] = crisis_state
-                return "Thank you for acknowledging. Your safety is the most important thing. Are you safe right now?", session_state, True, None
+                return "Thank you for acknowledging. Your safety is the most important thing. Are you safe right now?", session_state, True, None # Ensure message is assigned
             else: # If user says something else, repeat the persistent short message
                 return get_next_flow_step("crisis_support", 1), session_state, True, None
 
