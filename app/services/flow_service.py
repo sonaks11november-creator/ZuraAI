@@ -190,32 +190,11 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         # PRIORITY 0.4: Handle "help unavailable"
         unavailable_keywords = ["not available", "isn't available", "not working", "unavailable"]
-        if any(keyword in user_msg_lower for keyword in unavailable_keywords) and current_crisis_status != CRISIS_STATUS_HELP_UNAVAILABLE:
+        if any(keyword in user_msg_lower for keyword in unavailable_keywords):
             crisis_state["status"] = CRISIS_STATUS_HELP_UNAVAILABLE
-            if is_continuation: # User said "ok", "no need", etc. after immediate danger message
-                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
-                session_state["crisis_state"] = crisis_state
-                return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
-            # Otherwise, repeat the immediate danger message
-            else:
-                message = get_next_flow_step("crisis_support", 5)
-                if message:
-                    message = message.replace("{user_name}", user_name_for_flow) # Ensure message is assigned here
-                    mibocrisis_available = True # In a real system, this would be a dynamic check
-                    mibocrisis_msg = "If Mibo Crisis Help is unavailable, please use the emergency options below." if not mibocrisis_available else ""
-                    message = message.replace("{mibocrisis_availability_message}", mibocrisis_msg)
-
-                    # Add emergency contacts if Mibo Crisis Help is unavailable or if the user explicitly asked for them
-                    if not mibocrisis_available or intent_data.get("intent") == "CRISIS_EMERGENCY_CONTACT_REQUEST":
-                        contact_info_list = [f"• **{service}:** {number}" for service, number in therapy_service.EMERGENCY_CONTACTS_INDIA.items()]
-                        if contact_info_list:
-                            message += "\n\nHere are some emergency contacts:\n" + "\n".join(contact_info_list)
-
-                else: # Fallback for maximum safety if get_next_flow_step returns None
-                    message = (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
-                               "Move to a place where other people are present and contact emergency support immediately. "
-                               "If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help.")
-                return message, session_state, True, None
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 3)
+            return message, session_state, True, None
 
         # PRIORITY 0.5: Intercept normal booking intents during crisis
         # This is the key change to prevent repeating crisis messages when user tries to pivot.
@@ -232,7 +211,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         # PRIORITY 0.6: Handle "help contacted"
         contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to", "i reached out"]
-        if any(keyword in user_msg_lower for keyword in contacted_keywords) and crisis_state.get("status") != CRISIS_STATUS_HELP_CONTACTED:
+        if any(keyword in user_msg_lower for keyword in contacted_keywords):
             crisis_state["status"] = CRISIS_STATUS_HELP_CONTACTED
             session_state["crisis_state"] = crisis_state
             message = get_next_flow_step("crisis_support", 4)
@@ -240,11 +219,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 message = message.replace("{user_name}", user_name_for_flow)
             else:
                 # Fallback message if the flow step is missing
-                message = (
-                    f"I'm glad you reached out for help, {user_name_for_flow}. Please stay with the person or support service "
-                    "you've contacted and avoid being alone right now. If you're still in immediate danger, "
-                    "please continue with emergency support.\n\nAre you safe right now?"
-                )
+                message = f"I'm so glad you reached out for help, {user_name_for_flow}. Please stay with the person or support service you've contacted. Are you safe right now?"
             return message, session_state, True, None
 
         # --- STATE-BASED FALLBACKS for generic messages ---
