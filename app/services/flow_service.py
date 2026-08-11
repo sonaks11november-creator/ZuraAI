@@ -4,7 +4,7 @@ import re
 from app.services.redis_service import redis_client, SimpleCache
 from app.services.therapy_service import get_next_flow_step
 from app.services import assessment_service
-from app.services import care_navigator_service
+from app.services import care_navigator_service, therapy_service
 
 def get_session_state(user_id: int):
     session_key = f"zura_session:{user_id}"
@@ -36,6 +36,7 @@ CRISIS_STATUS_HELP_UNAVAILABLE = "CRISIS_HELP_UNAVAILABLE"
 CRISIS_STATUS_HELP_CONTACTED = "CRISIS_HELP_CONTACTED"
 CRISIS_STATUS_SAFETY_CHECK = "CRISIS_SAFETY_CHECK"
 CRISIS_STATUS_IMMEDIATE_DANGER = "CRISIS_IMMEDIATE_DANGER"
+CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED = "CRISIS_EMERGENCY_CONTACT_INFO_PROVIDED" # NEW
 CRISIS_STATUS_PENDING_RESOLUTION = "CRISIS_PENDING_RESOLUTION" # NEW
 CRISIS_STATUS_RESOLVED = "CRISIS_RESOLVED"
 
@@ -169,13 +170,24 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             return message, session_state, True, None
 
         # NEW: If already in IMMEDIATE_DANGER, repeat the message unless safety confirmed
+        # Or if user provides a generic continuation, transition to safety check
         if current_crisis_status == CRISIS_STATUS_IMMEDIATE_DANGER:
             # If user confirms safety, it will be caught by is_explicit_safety_confirmation below
+            if is_explicit_safety_confirmation:
+                # This path is handled by PRIORITY 0.2, so we just let it fall through
+                pass
+            elif is_continuation: # User said "ok", "no need", etc. after immediate danger message
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+                session_state["crisis_state"] = crisis_state
+                return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
             # Otherwise, repeat the immediate danger message
-            if not is_explicit_safety_confirmation:
+            else:
                 message = get_next_flow_step("crisis_support", 5)
                 if message:
                     message = message.replace("{user_name}", user_name_for_flow)
+                    # Add a prompt to ask for specific help if they need it
+                    message += "\n\nIf you need help contacting emergency services, please tell me."
+
                 else: # Hardcoded fallback for maximum safety
                     message = (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
                                "Move to a place where other people are present and contact emergency support immediately. "
@@ -183,10 +195,26 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 return message, session_state, True, None
 
         # --- PRIORITY 0.2: EXPLICIT SAFETY CONFIRMATION ---
+        # This needs to be checked *after* immediate danger handling, as "yes" can confirm safety.
         if is_explicit_safety_confirmation:
             session_state["crisis_state"] = {"status": CRISIS_STATUS_RESOLVED} # Reset state
             session_state["active_flow"] = None
             reply = "I'm so relieved to hear that you're feeling safer now. Thank you for letting me know. I'm still here to support you. What would you like to do next?"
+            
+            # If there was a pending normal intent, process it now
+            pending_normal_intent = session_state["crisis_state"].get("pending_normal_intent")
+            pending_user_preferences = session_state["crisis_state"].get("pending_user_preferences")
+            if pending_normal_intent:
+                pending_intent_to_process = {
+                    "intent": pending_normal_intent,
+                    "user_preferences": pending_user_preferences
+                }
+                print(f"DEBUG: Crisis resolved, returning pending intent: {pending_normal_intent}")
+                # Clear pending intent from crisis_state to prevent re-processing
+                if "crisis_state" in session_state:
+                    session_state["crisis_state"].pop("pending_normal_intent", None)
+                    session_state["crisis_state"].pop("pending_user_preferences", None)
+
             return reply, session_state, True, None
 
         # --- PRIORITY 0.3: Handle CRISIS_STATUS_PENDING_RESOLUTION ---
@@ -197,6 +225,27 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # If user says something else (e.g., "I don't want to answer", "what do you mean?"), re-ask for safety.
             if not is_explicit_safety_confirmation and not is_immediate_danger:
                 return "Your safety is my top priority. I need to confirm you are safe before we can move on. Are you safe right now?", session_state, True, pending_intent_to_process
+
+        # --- NEW PRIORITY 0.35: Handle CRISIS_EMERGENCY_CONTACT_REQUEST ---
+        # This is when the user explicitly asks "how can I contact emergency support?"
+        if intent_data.get("intent") == "CRISIS_EMERGENCY_CONTACT_REQUEST":
+            crisis_state["status"] = CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED
+            session_state["crisis_state"] = crisis_state
+            
+            # Dynamically check Mibo Crisis Help availability (placeholder)
+            mibocrisis_available = True # In a real system, this would be a dynamic check
+            
+            contact_info = "Here are some ways to contact emergency support:\n\n"
+            if mibocrisis_available:
+                contact_info += "• **Mibo Crisis Help (24/7):** Please open the Mibo homepage → Crisis Help (24/7) to connect with immediate support.\n"
+            else:
+                contact_info += "• Mibo Crisis Help is currently unavailable. Please use the following external resources.\n"
+            
+            for service, number in therapy_service.EMERGENCY_CONTACTS_INDIA.items():
+                contact_info += f"• **{service}:** {number}\n"
+            
+            contact_info += "\nRemember, please don't stay alone right now. Are you safe right now?"
+            return contact_info, session_state, True, None
 
         # --- PRIORITY 0.4: INTERCEPT NORMAL INTENTS DURING ACTIVE CRISIS ---
         # This is the key change to prevent repeating crisis messages when user tries to pivot.
@@ -260,6 +309,15 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # If user says something else, re-ask for safety.
             if not is_explicit_safety_confirmation and not is_immediate_danger:
                 return "Your safety is my top priority. Are you safe right now?", session_state, True, pending_intent_to_process
+        
+        # --- NEW PRIORITY 0.65: Handle CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED ---
+        if current_crisis_status == CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED:
+            if is_continuation: # User acknowledged the info, now ask for safety
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+                session_state["crisis_state"] = crisis_state
+                return "Thank you. Are you safe right now?", session_state, True, None
+            # If not a continuation, and not a safety confirmation, re-iterate and ask for safety
+            return "Please contact one of the emergency services I provided. Your safety is my top priority. Are you safe right now?", session_state, True, None
 
         # --- PRIORITY 0.7: Initial Escalation (if status is DETECTED) ---
         if current_crisis_status == CRISIS_STATUS_DETECTED:
@@ -276,7 +334,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             if is_continuation:
                 crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK # Move to safety check after initial ack
                 session_state["crisis_state"] = crisis_state
-                return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
+                return "Thank you for acknowledging. Your safety is the most important thing. Are you safe right now?", session_state, True, None
 
             # If not a continuation, and not an expert request (which is now handled by 0.4),
             # then repeat the persistent message.

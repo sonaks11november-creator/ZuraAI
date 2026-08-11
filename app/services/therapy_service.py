@@ -142,6 +142,13 @@ WELLNESS_FLOWS = {
     ],
 }
 
+EMERGENCY_CONTACTS_INDIA = {
+    "National Emergency Number": "112",
+    "Police": "100",
+    "Ambulance": "102",
+    "Fire": "101",
+    "Tele-MANAS (Mental Health Helpline)": "14416 or 1800-891-4416"
+}
 SUPPORTIVE_PHRASES = {
     "positive_reinforcement": [
         "That was a good step.",
