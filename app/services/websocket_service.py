@@ -142,6 +142,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             asyncio.create_task(asyncio.to_thread(track_triggers, db, user_id, analysis.get("triggers", [])))
             if analysis.get("name") and not user_name:
                 asyncio.create_task(asyncio.to_thread(update_user_name, db, user_id, analysis.get("name")))
+                user_name = analysis.get("name") # Immediately update user_name for the current session
                 db.refresh(user)
                 user_name = user.name
 
