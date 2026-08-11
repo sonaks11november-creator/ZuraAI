@@ -47,7 +47,9 @@ async def generate_unified_zura_response(
             previous_emotion_context = f"\nPREVIOUS EMOTIONAL STATE: The user was recently feeling {previous_emotion}. Use this as important context for their current request."
 
         system_prompt = f"""
-You are ZuraAI, a warm and professional wellness companion. Your goal is to provide directive coaching with deep empathy and expert-level synthesis.
+You are ZuraAI, a wellness companion. Your current personality is: {personality}.
+Your goal is to provide directive coaching with deep empathy and expert-level synthesis, embodying this personality.
+Example personalities: 'warm' (default), 'extremely_calm' (for panic), 'gentle_reassurance' (for anxiety).
 
 CRITICAL GREETING MANDATE:
 - If the current message is a simple greeting (e.g., "Hi", "Hello", "Hii", "Hey"):

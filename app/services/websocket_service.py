@@ -168,10 +168,8 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 # If the AI initiated the booking flow, its first question is the reply.
                 if intent_data.get("intent") == "Therapist Booking" and session_state.get("active_flow") == "therapist_booking":
                     final_reply = ai_output.get("reply", "I can help with that. What are you looking for support with?")
-                else:
-                    final_reply = ai_output.get("reply", "I'm here for you.")
-                final_reply = ai_output.get("reply", "I'm here for you.")
-                
+                else: final_reply = ai_output.get("reply", "I'm here for you.")
+
                 # Check if the AI or rules recommended a specific flow
                 intent_ai = ai_output.get("intent", "").lower()
                 reply_ai = final_reply.lower()
