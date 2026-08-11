@@ -113,7 +113,7 @@ async def chat(
     data: ChatSchema,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    token = Depends(security)
+    token: str = Depends(security)
 ):
     t_start = time.time()
     
@@ -123,16 +123,13 @@ async def chat(
         try:
             payload = jwt.decode(token.credentials, JWT_SECRET, algorithms=[ALGORITHM])
             user_id = payload.get("user_id")
-            if user_id:
-                current_user = db.query(User).filter(User.id == user_id).first()
+            current_user = db.query(User).filter(User.id == user_id).first() if user_id else None
         except Exception:
-            db.rollback() # Clear the poisoned transaction
-            pass # Fallback to visitor_id
-
+            db.rollback()  # Clear any poisoned transaction
+            pass  # Fallback to visitor_id
     if not current_user and data.visitor_id:
         current_user = db.query(User).filter(User.visitor_id == data.visitor_id).first()
         if not current_user:
-            # Create new guest user
             current_user = User(visitor_id=data.visitor_id)
             db.add(current_user)
             db.commit()
@@ -142,7 +139,7 @@ async def chat(
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="User identification required (Token or Visitor ID)")
 
-    # --- Ensure current_user is persistent ---
+    
     current_user = db.merge(current_user, load=False)
     session_state = get_session_state(current_user.id)
     user_name_val = current_user.name or session_state.get("user_name")
@@ -153,44 +150,28 @@ async def chat(
     
     user_message = data.message.strip()
 
-    # 1. Flow Interception (PRIORITY - BEFORE AI)
-    # Check if we should handle this purely as a flow step to save tokens and prevent AI greeting loops
-    flow_reply = None
-    flow_active = False
-    
-    # Identify low-complexity keywords or assessment answers
-    is_numeric = user_message.isdigit() and len(user_message) == 1
-    is_onboarding_choice = len(user_message) == 1 and user_message.upper() in ["A", "B", "C", "D"]
-    continuations = ["yes", "no", "ok", "okay", "next", "sure", "yep", "yup", "done", "stop", "cancel"]
-    is_simple_word = user_message.lower() in continuations
-    
-    in_flow_state = (
-        session_state.get("active_flow") or 
-        session_state.get("awaiting_confirmation") or 
-        session_state.get("active_assessment")
+    # 1. Pre-AI Flow Interception (Handles ongoing flows, crisis, etc.)
+    flow_reply, session_state, flow_active, pending_intent = handle_flow_logic(
+        user_message, session_state, intent_data={}, db=db, user_name=user_name_val
     )
 
-    if (is_simple_word or is_numeric or is_onboarding_choice) and in_flow_state:
-        # Fast-track flow handling without AI analysis
-        flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, db=db, user_name=user_name_val)
-        if flow_active:
-            # Skip AI entirely for simple flow steps
-            save_chat_history(db, current_user.id, user_message, flow_reply, session_state.get("last_emotion", "neutral"))
-            save_session_state(current_user.id, session_state)
-            return await construct_chat_response(
-                flow_reply, session_state.get("last_emotion", "neutral"), "continuation", "low", "FLOW",
-                {"type": "CONTINUE_FLOW", "flow": session_state.get("active_flow")},
-                {"exercise": flow_reply, "type": "Flow"}, voice_enabled, current_user.id
-            )
+    if flow_active:
+        save_chat_history(db, current_user.id, user_message, flow_reply, session_state.get("last_emotion", "neutral"))
+        save_session_state(current_user.id, session_state)
+        active_flow_name = session_state.get("active_flow", "FLOW")
+        return await construct_chat_response(
+            flow_reply, session_state.get("last_emotion", "neutral"), "continuation", "low",
+            active_flow_name.upper() if active_flow_name else "FLOW",
+            {"type": "CONTINUE_FLOW", "flow": active_flow_name},
+            {"exercise": flow_reply, "type": "Flow"}, voice_enabled, current_user.id
+        )
 
-    # 2. Context Gathering (Safe & Sequential)
+     # 2. Context Gathering for AI
     t_context = time.time()
-    # Memory search is async and safe to parallelize with local IO/CPU logic, 
-    # but DB sessions are NOT thread-safe.
     is_substantive = len(user_message) > 10
     memory_results = await search_memory(user_message) if is_substantive else None
     
-    # DB reads are fast enough to be sequential (<10ms)
+    
     history = get_chat_history(db, current_user.id, limit=3)
     insights = get_mood_insights(db, current_user.id)
     wellness_count = get_wellness_summary(db, current_user.id)
@@ -199,7 +180,7 @@ async def chat(
     retrieved_memories = memory_results.get("documents", [[]])[0] if memory_results else []
     print(f"DEBUG: Context took {time.time() - t_context:.4f}s")
 
-    # 2. Unified Zura Response (Single AI Call)
+     # 3. Unified Zura Response (Single AI Call)
     t_ai = time.time()
     personalized_context = get_personalized_prompt_extension(
         user_name=user_name_val, insights=insights, wellness_count=wellness_count,
@@ -215,96 +196,103 @@ async def chat(
         last_exercise=session_state.get("last_exercise"),
         completed_exercises=session_state.get("completed_exercises", []),
         refused_exercises=session_state.get("refused_exercises", []),
-        personalized_context=personalized_context
+        personalized_context=personalized_context,
+        personality=personality_mode(session_state.get("last_emotion", "neutral"))
     )
     print(f"DEBUG: AI Unified took {time.time() - t_ai:.4f}s")
 
     if not unified_output:
-        return {
-            "reply": "I'm here for you. Let's take a slow breath together.", "emotion": "neutral", 
-            "intent": "chat", "risk_level": "low", "recommended_feature": "BREATHE", 
-            "action": {"type": "NONE"}, "therapy": get_therapeutic_recommendation("neutral"), "audio_base64": None
-        }
+         return await construct_chat_response(
+            "I'm here for you. Let's take a slow breath together.", "neutral", "chat", "low", "BREATHE",
+            {"type": "NONE"}, get_therapeutic_recommendation("neutral"), voice_enabled, current_user.id
+        )
 
-    final_reply = unified_output.get("reply") or "I'm here for you. How are you feeling?"
     analysis = unified_output.get("analysis", {})
-    current_emotion = analysis.get("emotion") or "neutral"
-    severity = analysis.get("severity_score") if analysis.get("severity_score") is not None else 0.2
-    
-    # 2.5 Start Voice Generation IMMEDIATELY
+    current_emotion = analysis.get("emotion", "neutral")
+
+    # 4. Post-AI DB Updates & Voice Generation
     voice_task = None
-    if voice_enabled and final_reply:
-        voice_task = asyncio.create_task(text_to_speech(final_reply, voice="nova"))
+    ai_reply = unified_output.get("reply") or "I'm here for you. How are you feeling?"
+    if voice_enabled and ai_reply:
+        voice_task = asyncio.create_task(text_to_speech(ai_reply, voice="nova"))
 
-    # 3. DB Updates (Synchronous but fast, to avoid session closure issues)
-    # We do these here before returning to ensure session stability
+
     track_triggers(db, current_user.id, analysis.get("triggers", []))
-    if analysis.get("name"):
-        current_user.name = analysis.get("name")
+    if analysis.get("name") and not user_name_val:
         update_user_name(db, current_user.id, analysis.get("name"))
-    track_mood(db, current_user.id, current_emotion, severity, context=user_message)
 
-    # Track Exercise Feedback if provided
+    track_mood(db, current_user.id, current_emotion, analysis.get("severity_score", 0.2), context=user_message)
+    
     feedback = analysis.get("exercise_feedback")
     last_ex = session_state.get("last_exercise")
     if feedback and feedback != "none" and last_ex:
         from app.services.mood_service import track_wellness_progress
         track_wellness_progress(db, current_user.id, last_ex, last_ex.replace("_", " ").capitalize(), feedback=user_message)
-        # Clear last_exercise after feedback is recorded to prevent double-tracking
         session_state["last_exercise"] = None
 
-    # 4. Flow Interception
+    # 5. Post-AI Flow Logic (Handles flow *initiation*)
     t_flow = time.time()
     intent_data = {
-        "intent": analysis.get("intent") or "General chat",
-        "risk_level": analysis.get("risk_level") or "low",
+        "intent": analysis.get("intent", "General chat"),
+        "risk_level": analysis.get("risk_level", "low"),
         "user_preferences": analysis.get("user_preferences")
     }
-    emotion_data = {"emotion": current_emotion, "severity": severity}
-    
-    flow_reply, session_state, flow_active = handle_flow_logic(user_message, session_state, intent_data, emotion_data, db=db, user_name=user_name_val)
-    
-    if flow_active:
-        if voice_task: voice_task.cancel()
-        save_chat_history(db, current_user.id, user_message, flow_reply, current_emotion)
-        save_session_state(current_user.id, session_state)
-        return await construct_chat_response(
-            flow_reply, current_emotion, "continuation", "low", "FLOW",
-            {"type": "CONTINUE_FLOW", "flow": session_state.get("active_flow")},
-            {"exercise": flow_reply, "type": "Flow"}, voice_enabled, current_user.id
-        )
-    print(f"DEBUG: Flow Logic took {time.time() - t_flow:.4f}s")
+    emotion_data = {"emotion": current_emotion, "severity": analysis.get("severity_score", 0.2)}
 
-    # 5. Final State Save
+    if pending_intent:
+        intent_data["intent"] = pending_intent.get("intent")
+        intent_data["user_preferences"] = pending_intent.get("user_preferences", {})
+        print(f"DEBUG: Overriding AI intent with pending crisis intent: {intent_data['intent']}")
+
+    flow_reply, session_state, flow_active, _ = handle_flow_logic(
+        user_message, session_state, intent_data, emotion_data, db=db, user_name=user_name_val
+    )
+    print(f"DEBUG: Post-AI Flow Logic took {time.time() - t_flow:.4f}s")
+
+    final_reply = ai_reply
+    action = unified_output.get("action") or {"type": "NONE"}
+    recommended_feature = unified_output.get("recommended_feature") or "NONE"
+
+    if flow_active:
+        if voice_task: voice_task.cancel()  # Cancel original voice task
+        final_reply = flow_reply
+        active_flow_name = session_state.get("active_flow", "FLOW")
+        action = {"type": "CONTINUE_FLOW", "flow": active_flow_name}
+        recommended_feature = active_flow_name.upper() if active_flow_name else "FLOW"
+    else:
+        suggested_flow = unified_output.get("suggested_flow")
+        if suggested_flow and suggested_flow not in ["null", "flow_id_or_null"]:
+            session_state.update({"active_flow": None, "pending_flow": suggested_flow, "awaiting_confirmation": True, "current_step": 0})
+
+    # 6. Final State Save & Response
     suggested_flow = unified_output.get("suggested_flow")
     session_state["last_emotion"] = current_emotion
-    if suggested_flow and suggested_flow != "null":
-        session_state.update({"active_flow": None, "pending_flow": suggested_flow, "awaiting_confirmation": True, "current_step": 0})
-    
     save_chat_history(db, current_user.id, user_message, final_reply, current_emotion)
     save_session_state(current_user.id, session_state)
     
-    # Background task for vector memory only (as it's non-SQLAlchemy)
+    
     background_tasks.add_task(save_memory, current_user.id, user_message, current_emotion, intent_data["intent"])
 
-    # Wait for voice task
+    
     audio_base64 = None
-    if voice_task:
+    if voice_task and not voice_task.cancelled():
         t_voice = time.time()
         try:
             audio_base64 = await voice_task
         except Exception as e:
             print(f"Async Voice Error: {e}")
         print(f"DEBUG: Voice Wait took {time.time() - t_voice:.4f}s")
+    elif flow_active and voice_enabled and final_reply:
+        audio_base64 = await text_to_speech(final_reply, voice="nova")
 
     print(f"DEBUG: TOTAL Processing took {time.time() - t_start:.4f}s")
     return {
         "reply": final_reply,
         "emotion": current_emotion,
         "intent": intent_data["intent"],
-        "risk_level": analysis.get("risk_level") or "low",
-        "recommended_feature": unified_output.get("recommended_feature") or "NONE",
-        "action": unified_output.get("action") or {"type": "NONE"},
+        "risk_level": analysis.get("risk_level", "low"),
+        "recommended_feature": recommended_feature,
+        "action": action,
         "therapy": get_therapeutic_recommendation(current_emotion),
         "audio_base64": audio_base64
     }
