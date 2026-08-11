@@ -185,6 +185,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 message = get_next_flow_step("crisis_support", 5)
                 if message:
                     message = message.replace("{user_name}", user_name_for_flow)
+                    
+                    mibocrisis_available = True # In a real system, this would be a dynamic check
+                    mibocrisis_msg = "If Mibo Crisis Help is unavailable, please use the emergency options below." if not mibocrisis_available else ""
+                    message = message.replace("{mibocrisis_availability_message}", mibocrisis_msg)
+
+                    # Add emergency contacts if Mibo Crisis Help is unavailable or if the user explicitly asked for them
+                    if not mibocrisis_available or intent_data.get("intent") == "CRISIS_EMERGENCY_CONTACT_REQUEST":
+                        contact_info_list = [f"• **{service}:** {number}" for service, number in therapy_service.EMERGENCY_CONTACTS_INDIA.items()]
+                        if contact_info_list:
+                            message += "\n\nHere are some emergency contacts:\n" + "\n".join(contact_info_list)
+
                     # Add a prompt to ask for specific help if they need it
                     message += "\n\nIf you need help contacting emergency services, please tell me."
 
@@ -235,7 +246,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # Dynamically check Mibo Crisis Help availability (placeholder)
             mibocrisis_available = True # In a real system, this would be a dynamic check
             
-            contact_info = "Here are some ways to contact emergency support:\n\n"
+            contact_info = "Here are some ways to contact emergency support:\n"
             if mibocrisis_available:
                 contact_info += "• **Mibo Crisis Help (24/7):** Please open the Mibo homepage → Crisis Help (24/7) to connect with immediate support.\n"
             else:
@@ -307,6 +318,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # If user says "yes" (caught by is_explicit_safety_confirmation above), it resolves.
             # If user says "no" (caught by is_immediate_danger above), it escalates.
             # If user says something else, re-ask for safety.
+            # This is the persistent message for safety check.
             if not is_explicit_safety_confirmation and not is_immediate_danger:
                 return "Your safety is my top priority. Are you safe right now?", session_state, True, pending_intent_to_process
         

@@ -138,7 +138,7 @@ WELLNESS_FLOWS = {
         "I'm glad you reached out for help, {user_name}. Please stay with the person or support service you've contacted and avoid being alone right now. If you're still in immediate danger, please continue with emergency support.\n\nAre you safe right now?",
 
         # 5: Immediate Danger Response (Post-Contact Escalation)
-        "{user_name}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. Move to a place where other people are present and contact emergency support immediately. If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help."
+        "Thank you for telling me. Because you’re not safe right now, please get immediate human help. If you may hurt yourself, contact your local emergency service or go to the nearest emergency department now. Move to a place where other people are present and ask someone you trust to stay with you. {mibocrisis_availability_message}"
     ],
 }
 
