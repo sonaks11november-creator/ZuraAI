@@ -187,6 +187,54 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # User said something unclear, re-ask or clarify
             return "I'm sorry, I didn't quite catch that. Would you like me to suggest a mental-health professional?", session_state, True, None
 
+    # --- PRIORITY 0.06: HANDLE PENDING WELLNESS FLOW CONFIRMATION ---
+    # This block handles the user's response after ZuraAI has offered a wellness activity.
+    if session_state.get("awaiting_confirmation") and session_state.get("pending_flow"):
+        # This check ensures we don't clash with the expert confirmation logic which has its own state.
+        if not session_state.get("awaiting_expert_confirmation"):
+            affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "try it", "we can try", "let's try"]
+            negative_responses = ["no", "no thanks", "not now", "not really", "i don't want to", "i don't need"]
+
+            if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+                # User confirmed. Start the pending flow.
+                active_flow = session_state.pop("pending_flow")
+                session_state["awaiting_confirmation"] = False
+                session_state["active_flow"] = active_flow
+                session_state["current_step"] = 0 # Always start a new flow at step 0
+                session_state["media_session_active"] = False
+
+                # Get the first step of the flow and return it.
+                next_text = get_next_flow_step(active_flow, 0)
+                if next_text:
+                    session_state["current_step"] = 1
+                    session_state["last_exercise"] = active_flow
+                    return next_text, session_state, True, None
+                else: # Flow has no steps? End it.
+                    session_state["active_flow"] = None
+                    return "It seems there was an issue starting that activity. What would you like to do instead?", session_state, True, None
+
+            elif any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in negative_responses):
+                # User declined the pending flow.
+                pending_flow = session_state.pop("pending_flow", "an activity")
+                session_state["awaiting_confirmation"] = False
+                
+                # Mark the exercise as refused
+                refused = session_state.get("refused_exercises", [])
+                if pending_flow not in refused:
+                    refused.append(pending_flow)
+                session_state["refused_exercises"] = refused
+                
+                # Offer alternatives
+                reply = (
+                    "That's completely okay. We don't have to do that.\n\n"
+                    "Would you prefer to talk about what's on your mind, try a different kind of calming technique, or perhaps get some support from a Mibo expert?"
+                )
+                return reply, session_state, True, None
+            else:
+                # If the response is unclear, re-prompt for clarity.
+                pending_flow_name = session_state.get("pending_flow", "a wellness activity").replace("_", " ")
+                return f"Sorry, I didn't quite catch that. Would you like to try the {pending_flow_name} activity?", session_state, True, None
+
     # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
     # Activation:
@@ -707,30 +755,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state["recommended_experts"] = experts
             return final_reply, session_state, True, pending_intent_to_process # This is the reply for therapist booking recommendations
 
-    # --- NEW: Decline handling for pending flows ---
-    is_decline = user_msg_lower in ["no", "no thanks", "not now"]
-    if session_state.get("awaiting_confirmation") and is_decline:
-        # User declined the pending flow.
-        
-        # Mark the exercise as refused
-        pending_flow = session_state.get("pending_flow")
-        if pending_flow:
-            refused = session_state.get("refused_exercises", [])
-            if pending_flow not in refused:
-                refused.append(pending_flow)
-            session_state["refused_exercises"] = refused
-        
-        # Reset confirmation state so we don't get stuck here
-        session_state["awaiting_confirmation"] = False
-        session_state["pending_flow"] = None
-        
-        # Offer alternatives and let the next AI turn figure out the intent
-        reply = (
-            "That's completely okay. We don't have to do that.\n\n"
-            "Would you prefer to talk about what's on your mind, try a different kind of calming technique, or perhaps get some support from a Mibo expert?"
-        )
-        return reply, session_state, True, pending_intent_to_process
-
     # 0. Identify Continuations and Stops early
     # Negative Feedback Detection (No improvement after exercise)
     negative_feedback = ["no change", "no changes", "still stressed", "not working", "didn't help", "no better", "still feel", "no difference"]
@@ -923,23 +947,9 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         else:
             valid_range = "A to D" if active_assessment == "onboarding" else "0 to 3"
             return f"Please provide an answer from {valid_range} so I can calculate your result accurately.", session_state, True, pending_intent_to_process
-
-    # 4. Media Session Follow-up
-    if user_msg_lower == "media_finished":
+    elif user_msg_lower == "media_finished": # 4. Media Session Follow-up
         session_state["media_session_active"] = False
         return "Welcome back. How are you feeling now?", session_state, True, pending_intent_to_process
-
-    # Step A: Transition from "Awaiting Confirmation" -> "Active Flow"
-    just_activated = False
-    if not session_state.get("active_flow") and is_continuation and session_state.get("awaiting_confirmation"):
-        active_flow = session_state.get("pending_flow")
-        current_step = session_state.get("current_step", 0)
-        session_state["awaiting_confirmation"] = False
-        session_state["pending_flow"] = None
-        session_state["active_flow"] = active_flow
-        session_state["current_step"] = current_step
-        session_state["media_session_active"] = False
-        just_activated = True
 
     # Step B: Flow Execution
     active_flow = session_state.get("active_flow")
@@ -950,7 +960,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # EXCEPTION: For interactive flows, a simple "ok" or "yes" should NOT advance the step
         # unless it was the activation message (just_activated).
         is_interactive = active_flow in INTERACTIVE_FLOWS
-        
+        just_activated = False # This flag is no longer set, but the logic below is still valid.
         is_simple_confirmation = user_msg_lower in ["ok", "okay", "yes", "yeah", "sure", "yep", "yup", "ready"]
         
         if is_interactive and is_simple_confirmation and not just_activated:
