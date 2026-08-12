@@ -77,6 +77,34 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
 
+    # --- PRIORITY -2: GREETING AND PIVOT RESET ---
+    # A simple greeting or a clear emotional pivot should reset any stale state
+    # that might have been restored from a previous session (e.g., a stuck crisis flow).
+    # This ensures that a new conversation starts fresh.
+    greetings = ["hi", "hello", "hey", "hii", "howdy", "sup", "greetings", "good morning", "good evening", "good afternoon"]
+    continuations_for_reset_check = [
+        "ok", "okay", "yeah", "sure", "done", "next", "continue", "go on", "yes"
+    ]
+    is_not_a_continuation = user_msg_lower not in continuations_for_reset_check
+
+    has_greeting_word = any(word == user_msg_lower or user_msg_lower.startswith(word + " ") for word in greetings)
+    is_greeting_reset = is_not_a_continuation and has_greeting_word and len(user_msg_lower) < 20
+
+    is_explicit_emotion = any(phrase in user_msg_lower for phrase in ["i feel", "i'm feeling", "i am feeling"])
+    is_emotional_pivot = is_not_a_continuation and is_explicit_emotion
+
+    # If a flow is active from a restored session, but the user is starting over with a greeting or new emotion, reset the state.
+    if (is_greeting_reset or is_emotional_pivot) and session_state.get("active_flow"):
+        # This is a strong signal that the user is starting a new conversation,
+        # ignoring the restored session state. We should reset the flow state.
+        user_id = session_state.get("user_id")
+        user_name_preserved = session_state.get("user_name")
+        # Create a fresh state, but keep essential info
+        session_state = {"user_id": user_id, "user_name": user_name_preserved}
+        # Fall through to the normal AI response by returning False for flow_active.
+        # The AI will then process the greeting or new emotion as the start of a new conversation.
+        return None, session_state, False, None
+
     # --- PRIORITY -1: HARDCODED CRITICAL RISK OVERRIDE ---
     # This is a non-AI, keyword-based check that acts as a final safety net.
     # It overrides any other active flow if a new critical risk message is detected,
@@ -682,29 +710,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     negative_feedback = ["no change", "no changes", "still stressed", "not working", "didn't help", "no better", "still feel", "no difference"]
     has_negative_feedback = any(f in user_msg_lower for f in negative_feedback)
     is_stop = any(word in user_msg_lower for word in ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to"])
-
-    # 1. Basic Intent/Stop/Pivot Detection
-    greetings = ["hi", "hello", "hey", "hii", "howdy", "sup", "greetings", "good morning", "good evening", "good afternoon"]
-    
-    # Check for greeting (either AI detected or keyword matched) - make sure it's not a continuation
-    has_greeting_word = any(word == user_msg_lower or user_msg_lower.startswith(word + " ") for word in greetings)
-    is_greeting = (not is_continuation) and ((intent_data.get("emotion") == "neutral" and has_greeting_word) or (has_greeting_word and len(user_msg_lower) < 10))
-
-    # Emotional Pivot Detection: Only pivot if NOT a simple continuation
-    is_explicit_emotion = any(phrase in user_msg_lower for phrase in ["i feel", "i'm feeling", "i am feeling", "feeling really", "feeling so"])
-    emotion = emotion_data.get("emotion", "neutral")
-    is_emotional_pivot = (not is_continuation) and (emotion != "neutral" or is_explicit_emotion)
-
-    # 1a. State Reset (Greeting or Pivot)
-    if is_greeting or is_emotional_pivot:
-        # Reset everything to allow AI to take over
-        session_state["awaiting_confirmation"] = False
-        session_state["pending_flow"] = None
-        session_state["active_flow"] = None
-        session_state["active_assessment"] = None
-        session_state["current_step"] = 0
-        session_state["last_exercise"] = None
-        return None, session_state, False, pending_intent_to_process
 
     # 2. Stop/Cancel Check
     if is_stop:
