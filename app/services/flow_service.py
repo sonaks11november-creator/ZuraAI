@@ -498,189 +498,195 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         booking_step = session_state.get("booking_step", "intro")
         preferences = session_state.get("booking_preferences", {})
 
-        # This block handles the user's ANSWER to the previously asked question.
-        if booking_step != "intro":
-            question_type = booking_step
+        # Handle the intro step confirmation explicitly. This is the entry point after the user agrees to start.
+        if booking_step == "intro":
+            affirmative_intro = ["yes", "yeah", "yep", "sure", "okay", "ok", "of course", "go ahead", "yes please", "we can try", "i would like that", "let's do it", "let's try"]
+            if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_intro):
+                # User agreed. Ask the first question and update state to move to the next step.
+                next_question, question_type = _get_next_booking_question(preferences)
+                session_state["booking_step"] = question_type
+                session_state["booking_preferences"] = preferences
+                return next_question, session_state, True, None
+            else: # User said "no" or something else, so we exit the flow.
+                session_state["active_flow"] = None
+                return "Okay, no problem. What would you like to do instead?", session_state, True, None
 
-            if question_type == "recommendations_shown":
-                recommended_experts = session_state.get("recommended_experts", [])
-                if not recommended_experts: # Safety check
-                    session_state["active_flow"] = None
-                    return "Something went wrong, let's start over.", session_state, True, pending_intent_to_process
+        # If we are here, booking_step is NOT 'intro'. We are processing an answer to a previous question.
+        question_type = booking_step
 
-                # NEW: Check if user is booking a specific expert by name
-                if "book" in user_msg_lower:
-                    chosen_expert = None
-                    for expert in recommended_experts:
-                        if expert['name'].lower() in user_msg_lower:
-                            chosen_expert = expert
-                            break
-                    if chosen_expert:
-                        session_state["selected_expert"] = chosen_expert
-                        session_state["booking_step"] = "booking_guidance_shown"
-                        return f"Great! To book an appointment with {chosen_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
+        if question_type == "recommendations_shown":
+            recommended_experts = session_state.get("recommended_experts", [])
+            if not recommended_experts: # Safety check
+                session_state["active_flow"] = None
+                return "Something went wrong, let's start over.", session_state, True, pending_intent_to_process
 
-                if "compare" in user_msg_lower:
-                    comparison_text = "Here’s a comparison of the recommended experts:\n\n"
-                    for i, expert in enumerate(recommended_experts):
-                        comparison_text += (
-                            f"**{i+1}. {expert['name']} – {expert['role']}**\n"
-                            f"- **Specialties:** {', '.join(expert['specializations'][:3])}\n"
-                            f"- **Languages:** {', '.join(expert['languages'])}\n\n"
-                        )
-                    comparison_text += "Would you like to view a specific expert's full profile or book an appointment?"
-                    session_state["booking_step"] = "compare_shown" # Keep this step to handle follow-up from comparison
-                    return comparison_text, session_state, True, pending_intent_to_process
-                elif any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
-                    session_state["booking_step"] = "awaiting_profile_choice"
-                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
-                    reply = "Sure! Which expert would you like to know more about?\n\n" + "\n".join(expert_names)
-                    return reply, session_state, True, pending_intent_to_process
-                elif any(w in user_msg_lower for w in ["book", "appointment"]):
-                    # Ask which expert to book
-                    session_state["booking_step"] = "awaiting_profile_choice" # Re-use this to select an expert
-                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
-                    reply = "Of course. Which expert would you like to book an appointment with?\n\n" + "\n".join(expert_names)
-                    return reply, session_state, True, pending_intent_to_process
-                else:
-                    # Unrecognized intent, let the main AI loop handle it.
-                    session_state["active_flow"] = None
-                    return None, session_state, False, None
+            # NEW: Check if user is booking a specific expert by name
+            if "book" in user_msg_lower:
+                chosen_expert = None
+                for expert in recommended_experts:
+                    if expert['name'].lower() in user_msg_lower:
+                        chosen_expert = expert
+                        break
+                if chosen_expert:
+                    session_state["selected_expert"] = chosen_expert
+                    session_state["booking_step"] = "booking_guidance_shown"
+                    return f"Great! To book an appointment with {chosen_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
 
-            elif question_type == "compare_shown":
-                # After comparison, user can view profile or book. This logic is similar to recommendations_shown.
-                if any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
-                    session_state["booking_step"] = "awaiting_profile_choice"
-                    recommended_experts = session_state.get("recommended_experts", [])
-                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
-                    reply = "Sure! Which expert's full profile would you like to view?\n\n" + "\n".join(expert_names) # Keep this step to handle follow-up from comparison
-                    return reply, session_state, True, pending_intent_to_process
-                # Fallback to let AI handle other intents if not explicitly handled here
+            if "compare" in user_msg_lower:
+                comparison_text = "Here’s a comparison of the recommended experts:\n\n"
+                for i, expert in enumerate(recommended_experts):
+                    comparison_text += (
+                        f"**{i+1}. {expert['name']} – {expert['role']}**\n"
+                        f"- **Specialties:** {', '.join(expert['specializations'][:3])}\n"
+                        f"- **Languages:** {', '.join(expert['languages'])}\n\n"
+                    )
+                comparison_text += "Would you like to view a specific expert's full profile or book an appointment?"
+                session_state["booking_step"] = "compare_shown" # Keep this step to handle follow-up from comparison
+                return comparison_text, session_state, True, pending_intent_to_process
+            elif any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
+                session_state["booking_step"] = "awaiting_profile_choice"
+                expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                reply = "Sure! Which expert would you like to know more about?\n\n" + "\n".join(expert_names)
+                return reply, session_state, True, pending_intent_to_process
+            elif any(w in user_msg_lower for w in ["book", "appointment"]):
+                # Ask which expert to book
+                session_state["booking_step"] = "awaiting_profile_choice" # Re-use this to select an expert
+                expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                reply = "Of course. Which expert would you like to book an appointment with?\n\n" + "\n".join(expert_names)
+                return reply, session_state, True, pending_intent_to_process
+            else:
+                # Unrecognized intent, let the main AI loop handle it.
                 session_state["active_flow"] = None
                 return None, session_state, False, None
 
-            elif question_type == "awaiting_profile_choice":
+        elif question_type == "compare_shown":
+            # After comparison, user can view profile or book. This logic is similar to recommendations_shown.
+            if any(w in user_msg_lower for w in ["view", "profile", "details", "more"]):
+                session_state["booking_step"] = "awaiting_profile_choice"
                 recommended_experts = session_state.get("recommended_experts", [])
-                chosen_expert = None
-                # Find by number
-                match = re.search(r'\b(\d+)\b', user_msg_lower)
-                if match:
-                    try:
-                        choice_index = int(match.group(1)) - 1
-                        if 0 <= choice_index < len(recommended_experts):
-                            chosen_expert = recommended_experts[choice_index]
-                    except (ValueError, IndexError): pass
-                
-                # Find by name if not by number
-                if not chosen_expert:
-                    for expert in recommended_experts:
-                        if expert['name'].lower() in user_msg_lower:
-                            chosen_expert = expert
-                            break
+                expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                reply = "Sure! Which expert's full profile would you like to view?\n\n" + "\n".join(expert_names) # Keep this step to handle follow-up from comparison
+                return reply, session_state, True, pending_intent_to_process
+            # Fallback to let AI handle other intents if not explicitly handled here
+            session_state["active_flow"] = None
+            return None, session_state, False, None
 
-                if chosen_expert:
-                    session_state["selected_expert"] = chosen_expert
-                    profile_reply = (
-                        f"**{chosen_expert['name']}**\n{chosen_expert['role']}\n\n"
-                        f"**Experience:** {chosen_expert['experience']}\n"
-                        f"**Languages:** {', '.join(chosen_expert['languages'])}\n"
-                        f"**Consultation:** {', '.join(chosen_expert['consultation_types'])}\n"
-                        f"**Areas of expertise:**\n• " + "\n• ".join(chosen_expert['specializations']) +
-                        "\n\nWould you like to:\n• Book an appointment\n• Compare with another expert\n• View another profile"
-                    )
-                    session_state["booking_step"] = "profile_shown" # Keep this step to handle follow-up from profile view
-                    return profile_reply, session_state, True, pending_intent_to_process
-                else:
-                    expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
-                    reply = "I'm sorry, I didn't recognize that choice. Please select an expert from the list by name or number:\n\n" + "\n".join(expert_names)
-                    return reply, session_state, True, pending_intent_to_process
+        elif question_type == "awaiting_profile_choice":
+            recommended_experts = session_state.get("recommended_experts", [])
+            chosen_expert = None
+            # Find by number
+            match = re.search(r'\b(\d+)\b', user_msg_lower)
+            if match:
+                try:
+                    choice_index = int(match.group(1)) - 1
+                    if 0 <= choice_index < len(recommended_experts):
+                        chosen_expert = recommended_experts[choice_index]
+                except (ValueError, IndexError): pass
+            
+            # Find by name if not by number
+            if not chosen_expert:
+                for expert in recommended_experts:
+                    if expert['name'].lower() in user_msg_lower:
+                        chosen_expert = expert
+                        break
 
-            elif question_type == "profile_shown":
-                selected_expert = session_state.get("selected_expert", {})
-                if not selected_expert: # Safety check
-                    session_state["active_flow"] = None
-                    return "Something went wrong, let's start over.", session_state, True, pending_intent_to_process
+            if chosen_expert:
+                session_state["selected_expert"] = chosen_expert
+                profile_reply = (
+                    f"**{chosen_expert['name']}**\n{chosen_expert['role']}\n\n"
+                    f"**Experience:** {chosen_expert['experience']}\n"
+                    f"**Languages:** {', '.join(chosen_expert['languages'])}\n"
+                    f"**Consultation:** {', '.join(chosen_expert['consultation_types'])}\n"
+                    f"**Areas of expertise:**\n• " + "\n• ".join(chosen_expert['specializations']) +
+                    "\n\nWould you like to:\n• Book an appointment\n• Compare with another expert\n• View another profile"
+                )
+                session_state["booking_step"] = "profile_shown" # Keep this step to handle follow-up from profile view
+                return profile_reply, session_state, True, pending_intent_to_process
+            else:
+                expert_names = [f"{i+1}. {expert['name']}" for i, expert in enumerate(recommended_experts)]
+                reply = "I'm sorry, I didn't recognize that choice. Please select an expert from the list by name or number:\n\n" + "\n".join(expert_names)
+                return reply, session_state, True, pending_intent_to_process
 
-                if any(w in user_msg_lower for w in ["fee", "fees", "how much", "cost"]):
-                    fee = selected_expert.get("fee", "₹1500 per session") # Mock fee for demonstration
-                    reply = f"The consultation fee for {selected_expert['name']} is {fee}. Would you like to book an appointment?"
-                    session_state["booking_step"] = "fee_shown"
-                    return reply, session_state, True, pending_intent_to_process
+        elif question_type == "profile_shown":
+            selected_expert = session_state.get("selected_expert", {})
+            if not selected_expert: # Safety check
+                session_state["active_flow"] = None
+                return "Something went wrong, let's start over.", session_state, True, pending_intent_to_process
 
-                if any(w in user_msg_lower for w in ["book", "appointment"]):
-                    session_state["booking_step"] = "booking_guidance_shown"
-                    return f"To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
+            if any(w in user_msg_lower for w in ["fee", "fees", "how much", "cost"]):
+                fee = selected_expert.get("fee", "₹1500 per session") # Mock fee for demonstration
+                reply = f"The consultation fee for {selected_expert['name']} is {fee}. Would you like to book an appointment?"
+                session_state["booking_step"] = "fee_shown"
+                return reply, session_state, True, pending_intent_to_process
 
-                # If intent is not recognized, end the booking flow and provide a neutral response.
+            if any(w in user_msg_lower for w in ["book", "appointment"]):
+                session_state["booking_step"] = "booking_guidance_shown"
+                return f"To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
+
+            # If intent is not recognized, end the booking flow and provide a neutral response.
+            session_state["active_flow"] = None
+            return "Okay. What would you like to do instead?", session_state, True, None
+
+        elif question_type == "fee_shown":
+            selected_expert = session_state.get("selected_expert")
+            if is_continuation or "book" in user_msg_lower:
+                session_state["booking_step"] = "booking_guidance_shown" # Keep this step to handle follow-up from fee shown
+                return f"Great! To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
+            else:
                 session_state["active_flow"] = None
                 return "Okay. What would you like to do instead?", session_state, True, None
 
-            elif question_type == "fee_shown":
-                selected_expert = session_state.get("selected_expert")
-                if is_continuation or "book" in user_msg_lower:
-                    session_state["booking_step"] = "booking_guidance_shown" # Keep this step to handle follow-up from fee shown
-                    return f"Great! To book an appointment with {selected_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, None
-                else:
-                    session_state["active_flow"] = None
-                    return "Okay. What would you like to do instead?", session_state, True, None
-
-            elif question_type == "booking_guidance_shown":
-                selected_expert = session_state.get("selected_expert")
-                if is_continuation:
-                    # Fully reset the flow state here after the final message
-                    session_state["active_flow"] = None
-                    session_state["booking_step"] = None
-                    session_state["booking_preferences"] = {}
-                    session_state["recommended_experts"] = []
-                    session_state["selected_expert"] = None
-                    
-                    expert_name = selected_expert['name'] if selected_expert else "the expert"
-                    
-                    return (
-                        f"You're welcome! I hope you're able to connect with {expert_name} soon.\n\n"
-                        "If you need any help before or after your appointment, or if you'd like support with anything else, I'm here for you." # Keep this step to handle follow-up from booking guidance
-                    ), session_state, True, None
-                else:
-                    # If they ask something else, let the AI handle it by ending the flow.
-                    session_state["active_flow"] = None
-                    return None, session_state, False, None
-            
-            answer = user_msg_lower
-            
-            if question_type == "concern":
-                preferences["concern"] = user_message.strip()
-            elif question_type == "consultation_type":
-                if "online" in answer:
-                    preferences["consultation_type"] = "Online"
-                elif "person" in answer:
-                    preferences["consultation_type"] = "In-person"
-                else: # Invalid answer, re-ask
-                    question, _ = _get_next_booking_question({"concern": preferences.get("concern")}) # Re-ask the same question
-                    return f"I didn't quite catch that. {question}", session_state, True, pending_intent_to_process
-            elif question_type == "language":
-                cleaned_lang = answer
-                for prefix in ["yes, ", "sure, ", "i prefer ", "please ", "i speak "]:
-                    if cleaned_lang.startswith(prefix):
-                        cleaned_lang = cleaned_lang[len(prefix):]
-                cleaned_lang = cleaned_lang.replace(" please", "").strip() # Clean up the language input
-                if cleaned_lang:
-                    preferences["language"] = cleaned_lang.capitalize()
-                else: # Invalid answer, re-ask
-                    question, _ = _get_next_booking_question({"concern": preferences.get("concern"), "consultation_type": preferences.get("consultation_type")})
-                    return f"Sorry, which language was that?", session_state, True, None
-            elif question_type == "city":
-                known_cities = ["kochi", "bengaluru", "mumbai"]
-                found_city = next((city for city in known_cities if city in answer), None)
-                if found_city:
-                    preferences["city"] = found_city.capitalize() # Set the city preference
-                else:
-                    return "I'm sorry, I can only search in Kochi, Bengaluru, or Mumbai right now. Which would you prefer?", session_state, True, None
-
-        # Handle the intro step
-        if booking_step == "intro":
-            if not is_continuation: # User said "no" or something else
+        elif question_type == "booking_guidance_shown":
+            selected_expert = session_state.get("selected_expert")
+            if is_continuation:
+                # Fully reset the flow state here after the final message
                 session_state["active_flow"] = None
-                return "Okay, no problem. What would you like to do instead?", session_state, True, pending_intent_to_process
+                session_state["booking_step"] = None
+                session_state["booking_preferences"] = {}
+                session_state["recommended_experts"] = []
+                session_state["selected_expert"] = None
+                
+                expert_name = selected_expert['name'] if selected_expert else "the expert"
+                
+                return (
+                    f"You're welcome! I hope you're able to connect with {expert_name} soon.\n\n"
+                    "If you need any help before or after your appointment, or if you'd like support with anything else, I'm here for you." # Keep this step to handle follow-up from booking guidance
+                ), session_state, True, None
+            else:
+                # If they ask something else, let the AI handle it by ending the flow.
+                session_state["active_flow"] = None
+                return None, session_state, False, None
+        
+        answer = user_msg_lower
+        
+        if question_type == "concern":
+            preferences["concern"] = user_message.strip()
+        elif question_type == "consultation_type":
+            if "online" in answer:
+                preferences["consultation_type"] = "Online"
+            elif "person" in answer:
+                preferences["consultation_type"] = "In-person"
+            else: # Invalid answer, re-ask
+                question, _ = _get_next_booking_question({"concern": preferences.get("concern")}) # Re-ask the same question
+                return f"I didn't quite catch that. {question}", session_state, True, pending_intent_to_process
+        elif question_type == "language":
+            cleaned_lang = answer
+            for prefix in ["yes, ", "sure, ", "i prefer ", "please ", "i speak "]:
+                if cleaned_lang.startswith(prefix):
+                    cleaned_lang = cleaned_lang[len(prefix):]
+            cleaned_lang = cleaned_lang.replace(" please", "").strip() # Clean up the language input
+            if cleaned_lang:
+                preferences["language"] = cleaned_lang.capitalize()
+            else: # Invalid answer, re-ask
+                question, _ = _get_next_booking_question({"concern": preferences.get("concern"), "consultation_type": preferences.get("consultation_type")})
+                return f"Sorry, which language was that?", session_state, True, None
+        elif question_type == "city":
+            known_cities = ["kochi", "bengaluru", "mumbai"]
+            found_city = next((city for city in known_cities if city in answer), None)
+            if found_city:
+                preferences["city"] = found_city.capitalize() # Set the city preference
+            else:
+                return "I'm sorry, I can only search in Kochi, Bengaluru, or Mumbai right now. Which would you prefer?", session_state, True, None
 
         # Step 3: Collect missing information by asking the next question
         next_question, question_type = _get_next_booking_question(preferences)
