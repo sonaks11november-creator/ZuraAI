@@ -498,7 +498,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         booking_step = session_state.get("booking_step", "intro")
         preferences = session_state.get("booking_preferences", {})
 
-        # Handle the intro step confirmation explicitly. This is the entry point after the user agrees to start.
+        #Handle the intro step confirmation explicitly. This is the entry point after the user agrees to start.
         if booking_step == "intro":
             affirmative_intro = ["yes", "yeah", "yep", "sure", "okay", "ok", "of course", "go ahead", "yes please", "we can try", "i would like that", "let's do it", "let's try"]
             if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_intro):
