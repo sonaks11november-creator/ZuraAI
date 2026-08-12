@@ -77,6 +77,27 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
 
+    # --- PRIORITY -1: HARDCODED CRITICAL RISK OVERRIDE ---
+    # This is a non-AI, keyword-based check that acts as a final safety net.
+    # It overrides any other active flow if a new critical risk message is detected,
+    # ensuring that a restored session state with an active flow (e.g., booking)
+    # is immediately interrupted by a new crisis.
+    CRITICAL_RISK_ENTRY_PHRASES = [
+        "i want to end my life", "i want to kill myself", "i want to die",
+        "i don't want to live", "i am going to hurt myself", "i'm going to kill myself",
+        "i'm going to end it all", "goodbye everyone"
+    ]
+    is_hardcoded_critical_risk = any(phrase in user_msg_lower for phrase in CRITICAL_RISK_ENTRY_PHRASES)
+    is_new_crisis_for_override = session_state.get("active_flow") != "crisis_support"
+
+    if is_hardcoded_critical_risk and is_new_crisis_for_override:
+        session_state["crisis_state"] = {"status": CRISIS_STATUS_DETECTED}
+        session_state["active_flow"] = "crisis_support"
+        user_name_for_flow = user_name or session_state.get("user_name", "there")
+        message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+        session_state["crisis_state"]["status"] = CRISIS_STATUS_HELP_SHOWN
+        return message, session_state, True, None
+
     # Define is_continuation early, as it's used in crisis flow logic
     continuations = [
         "ok", "okay", "yeah", "sure", "done", "next", "continue", "go on",
