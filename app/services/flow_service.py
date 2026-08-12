@@ -162,6 +162,31 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             print(f"DEBUG: Crisis resolved, returning pending intent: {pending_normal_intent}")
         # Do NOT return True here. Let the message fall through to other flow logic.
 
+    # --- NEW PRIORITY 0.05: HANDLE PENDING EXPERT CONFIRMATION ---
+    # This block handles the user's response after ZuraAI has offered to suggest an expert post-crisis.
+    if session_state.get("awaiting_expert_confirmation"):
+        affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "book", "suggest"]
+        negative_responses = ["no", "no thanks", "not now", "not really", "i don't want to", "i don't need"]
+
+        if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+            session_state["awaiting_expert_confirmation"] = False # Clear the flag
+            # Initiate Therapist Booking flow
+            session_state["active_flow"] = "therapist_booking"
+            session_state["booking_preferences"] = {}
+            session_state["booking_step"] = "intro"
+            reply = (
+                "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+                "I'll just need to ask a few quick questions. Is that okay?"
+            )
+            return reply, session_state, True, None
+        elif any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in negative_responses):
+            session_state["awaiting_expert_confirmation"] = False # Clear the flag
+            session_state["active_flow"] = None # Ensure no flow is active
+            return "Okay, no problem. What would you like to do instead?", session_state, True, None
+        else:
+            # User said something unclear, re-ask or clarify
+            return "I'm sorry, I didn't quite catch that. Would you like me to suggest a mental-health professional?", session_state, True, None
+
     # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
     # Activation:
@@ -227,6 +252,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             else:
                 # If no intent was pending, we proactively offer to start the process.
                 reply = "I'm glad you're feeling safer. If you'd like, we can now help you connect with a mental-health professional. Would you like me to suggest an expert?"
+                session_state["awaiting_expert_confirmation"] = True # Set the flag here
 
             session_state["crisis_state"]["status"] = CRISIS_STATUS_RESOLVED # Mark as resolved
             session_state["active_flow"] = None # Exit the crisis flow
