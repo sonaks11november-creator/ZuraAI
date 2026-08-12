@@ -235,6 +235,29 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 pending_flow_name = session_state.get("pending_flow", "a wellness activity").replace("_", " ")
                 return f"Sorry, I didn't quite catch that. Would you like to try the {pending_flow_name} activity?", session_state, True, None
 
+    # --- PRIORITY 0.1: INITIATE BOOKING FLOWS FROM INTENT ---
+    # This logic runs when the AI has detected an intent to book, but no flow is active yet.
+    # It takes priority over the generic AI reply by returning its own canonical question.
+    is_therapist_booking_intent = intent_data.get("intent") == "Therapist Booking"
+    is_doctor_booking_intent = intent_data.get("intent") == "Doctor Booking"
+
+    if (is_therapist_booking_intent or is_doctor_booking_intent) and not session_state.get("active_flow"):
+        flow_type = "therapist_booking" if is_therapist_booking_intent else "doctor_booking"
+        session_state["active_flow"] = flow_type
+        session_state["booking_preferences"] = intent_data.get("user_preferences", {})
+        session_state["booking_step"] = "intro"
+
+        reply = (
+            "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+            "I'll just need to ask a few quick questions. Is that okay?"
+        )
+        if flow_type == "doctor_booking":
+            reply = (
+                "Of course, I can help with that. To find the right Mibo expert, "
+                "I'll just need to ask a couple of quick questions. Is that okay?"
+            )
+        return reply, session_state, True, None
+
     # --- PRIORITY 0: CRITICAL RISK INTERVENTION ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
     # Activation:
@@ -610,6 +633,67 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     current_step = session_state.get("current_step", 0)
 
     if active_flow:
+        # --- Booking Flow State Machine ---
+        if active_flow in ["therapist_booking", "doctor_booking"]:
+            booking_step = session_state.get("booking_step")
+            preferences = session_state.get("booking_preferences", {})
+
+            # Part 1: Process current user input based on the current step
+            if booking_step == "intro":
+                affirmative_responses = ["yes", "ok", "okay", "sure", "yeah", "yep", "yup", "go ahead", "let's do it"]
+                if not any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+                    # If the user says "no" or anything else, cancel the flow.
+                    session_state["active_flow"] = None
+                    session_state.pop("booking_step", None)
+                    session_state.pop("booking_preferences", None)
+                    return "Okay, no problem. What would you like to do instead?", session_state, True, None
+                # If affirmative, we proceed to Part 2 to get the first question.
+            else:
+                # The user is answering a question to fill a preference.
+                preferences[booking_step] = user_message
+                session_state["booking_preferences"] = preferences
+
+            # Part 2: Determine the next question or finish the flow
+            if active_flow == "therapist_booking":
+                next_question, preference_key = _get_next_booking_question(preferences)
+            else: # doctor_booking
+                next_question, preference_key = _get_next_doctor_booking_question(preferences)
+
+            if next_question:
+                session_state["booking_step"] = preference_key
+                return next_question, session_state, True, None
+            else:
+                # All info gathered, find experts and end the flow.
+                role_override = "Psychiatrist" if active_flow == "doctor_booking" else None
+                experts = care_navigator_service.find_experts(
+                    concern=preferences.get("concern", "general support"),
+                    severity="moderate", # This could be enhanced to use session emotion severity
+                    preferences=preferences,
+                    role_override=role_override
+                )
+
+                if not experts:
+                    reply = "I'm sorry, I couldn't find any experts that match your preferences right now. Would you like to change your preferences and try again?"
+                else:
+                    reply = "Great, thank you. Based on what you've told me, here are a few experts who might be a good fit:\n\n"
+                    for i, expert in enumerate(experts[:3]): # Show top 3
+                        reply += f"{i+1}. **{expert['name']}** ({expert['role']})\n"
+                        reply += f"   - Specializes in: {', '.join(expert['specializations'][:2])}\n"
+                        reply += f"   - Speaks: {', '.join(expert['languages'])}\n"
+                        if preferences.get("consultation_type") == "In-person":
+                             reply += f"   - Location: {expert['city']} ({'/'.join(expert['consultation_types'])})\n\n"
+                        else:
+                             reply += f"   - Available for: {'/'.join(expert['consultation_types'])}\n\n"
+
+                reply += "What would you like to do next?"
+
+                # Clean up and end the booking flow
+                session_state["active_flow"] = None
+                session_state.pop("booking_step", None)
+                # We can keep booking_preferences in the session in case the user wants to modify the search.
+
+                return reply, session_state, True, None
+
         # Rule: If it's an interactive flow, ANY non-greeting/stop input progresses it.
         # EXCEPTION: For interactive flows, a simple "ok" or "yes" should NOT advance the step
         # unless it was the activation message (just_activated).

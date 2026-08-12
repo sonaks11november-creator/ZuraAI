@@ -51,6 +51,8 @@ def find_experts(
         preferences = {}
 
     role, specializations = map_concern_to_role_and_specialization(concern, severity)
+    if role_override:
+        role = role_override
     
     if not role:
         role = "Clinical Psychologist" # Fallback role
