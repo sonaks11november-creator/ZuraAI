@@ -253,7 +253,8 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # If user says something else, re-ask for safety.
             # This is the persistent message for safety check.
             if not is_explicit_safety_confirmation and not is_immediate_danger:
-                return "Your safety is my top priority. Are you safe right now?", session_state, True, pending_intent_to_process
+                # Provide more context if the user gives an unclear answer like "what" or "no need".
+                return "I'm asking because your safety is my highest priority. Before we continue, I need to make sure you are not in immediate danger. Are you safe right now?", session_state, True, pending_intent_to_process
         
         if current_crisis_status == CRISIS_STATUS_HELP_UNAVAILABLE and is_continuation:
             crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK

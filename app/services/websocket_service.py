@@ -46,52 +46,6 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
             user = db.query(User).filter(User.id == user_id).first()
             user_name = user.name if user else None
 
-            intent_data = {} # Initialize to prevent NameError on first pass
-            # 2. Flow Orchestration (Priority 1)
-            flow_reply, session_state, flow_active, pending_intent_from_crisis = handle_flow_logic(user_message, session_state, intent_data, db=db, user_name=user_name)
-            
-            if flow_active:
-                # Track exercise completion if a flow just finished
-                if flow_reply is None: # Flow finished in handle_flow_logic returns None, state, False
-                    pass # This is handled below when flow_active is False
-                
-                # Save assessment result if finished
-                if session_state.get("last_assessment_result"):
-                    res = session_state.pop("last_assessment_result")
-                    db_res = AssessmentResult(
-                        user_id=user_id,
-                        assessment_type=res["assessment_type"],
-                        score=res["score"],
-                        result_category=res["result_category"]
-                    )
-                    db.add(db_res)
-                    db.commit()
-
-                save_session_state(user_id, session_state)
-                save_chat_history(db, user_id, user_message, flow_reply, session_state.get("last_emotion", "neutral"))
-                
-                active_flow = session_state.get("active_flow")
-                await websocket.send_json({
-                    "reply": flow_reply,
-                    "emotion": session_state.get("last_emotion", "neutral"),
-                    "intent": "continuation",
-                    "risk_level": "low",
-                    "recommended_feature": active_flow.upper() if active_flow else "BREATHE",
-                    "action": {
-                        "type": "CONTINUE_FLOW", 
-                        "feature": active_flow.upper() if active_flow else "BREATHE",
-                        "flow": active_flow, 
-                        "step": session_state["current_step"]
-                    },
-                    "therapy": {"exercise": flow_reply, "type": "Flow"}
-                })
-                continue
-
-            # Check if a flow JUST finished (flow_active was true last time, now it's false)
-            if not flow_active and session_state.get("last_exercise") and not session_state.get("active_flow"):
-                 # Record wellness progress when a flow finishes
-                 track_wellness_progress(db, user_id, session_state["last_exercise"], session_state["last_exercise"], feedback="completed")
-
             # 3. Contextual Data
             from app.services.memory_search_service import search_memory
             memory_results = search_memory(user_message)
@@ -109,7 +63,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 }
             )
 
-            # 1. Comprehensive AI Response Generation (Single Call)
+            # 1. Comprehensive AI Analysis (Single Call)
             ai_output = await generate_ai_response(
                 message=user_message,
                 memories=retrieved_memories,
@@ -146,21 +100,28 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                 db.refresh(user)
                 user_name = user.name
 
-            # Re-run flow logic now that we have AI analysis to detect pivots, greetings, or crisis
+            # 2. Flow Orchestration (Single Authoritative Call)
+            # This single call to handle_flow_logic now has all context: existing session state AND the new AI analysis.
+            # It is responsible for deciding if a crisis takes over, a new flow starts, an old flow continues, or if the conversation falls through to the AI.
+            # This prevents the bug where a crisis was detected but a booking flow was activated in a separate step.
+            pending_intent_from_crisis = session_state.get("crisis_state", {}).get("pending_normal_intent")
             # If there was a pending intent from a resolved crisis, override the AI's detected intent
             if pending_intent_from_crisis:
-                intent_data["intent"] = pending_intent_from_crisis["intent"]
-                intent_data["user_preferences"] = pending_intent_from_crisis["user_preferences"]
+                intent_data["intent"] = pending_intent_from_crisis.get("intent")
+                intent_data["user_preferences"] = pending_intent_from_crisis.get("user_preferences")
                 print(f"DEBUG: Overriding AI intent with pending crisis intent: {intent_data['intent']}")
-            flow_reply, session_state, flow_active, pending_intent_from_crisis = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
+            flow_reply, session_state, flow_active, _ = handle_flow_logic(user_message, session_state, intent_data, emotion_data=emotion_data, db=db, user_name=user_name)
 
             if flow_active and flow_reply:
-                # This block will now be entered if a crisis is detected and the flow is activated.
                 final_reply = flow_reply
                 active_flow = session_state.get("active_flow")
                 action_data = {"type": "CONTINUE_FLOW", "feature": active_flow.upper() if active_flow else "BREATHE"}
                 recommended_feature = active_flow.upper() if active_flow else "BREATHE"
             else:
+                # Check if a flow JUST finished
+                if not flow_active and session_state.get("last_exercise") and not session_state.get("active_flow"):
+                    # Record wellness progress when a flow finishes
+                    track_wellness_progress(db, user_id, session_state["last_exercise"], session_state["last_exercise"], feedback="completed")
                 # DEFAULT: AI Chat + Wellness Flow Detection
                 current_severity = emotion_data["severity"]
                 current_emotion = emotion_data["emotion"]
