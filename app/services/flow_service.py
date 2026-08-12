@@ -77,6 +77,12 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     intent_data = intent_data or {}
     emotion_data = emotion_data or {}
 
+    # --- DEBUG LOGGING ---
+    print(f"USER: {user_message}")
+    print(f"INTENT: {intent_data.get('intent')}")
+    print(f"ACTIVE FLOW: {session_state.get('active_flow')}")
+    print(f"BOOKING STEP: {session_state.get('booking_step')}")
+
     # --- PRIORITY -2: GREETING AND PIVOT RESET ---
     # A simple greeting or a clear emotional pivot should reset any stale state
     # that might have been restored from a previous session (e.g., a stuck crisis flow).
@@ -262,6 +268,548 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 # This part is simplified for brevity, the full expert formatting logic will be here.
                 reply += f"1. **{experts[0]['name']}** ({experts[0]['role']})"
             session_state["active_flow"] = None
+            # --- FIX: Preserve booking state for post-recommendation actions ---
+            session_state["active_flow"] = flow_type # Keep booking flow active
+            session_state["booking_step"] = "expert_action" # New step for user action
+            session_state["recommended_experts"] = experts # Store experts
+
+            reply += "\n\nWhat would you like to do next?\n"
+            reply += "• View an expert's full profile\n"
+            reply += "• Compare the recommended experts\n"
+            reply += "• Book an appointment\n"
+            reply += "• Refine search"
+            # --- END FIX ---
+
+            return reply, session_state, True, None
+
+        # --- NEW: Handle expert_action step ---
+        elif booking_step == "expert_action":
+            # This is where user interacts with recommendations (view profile, compare, book, refine)
+            # For now, a simple placeholder. This needs detailed implementation based on user input.
+            if "profile" in user_msg_lower:
+                return "Which expert's profile would you like to view?", session_state, True, None
+            elif "book" in user_msg_lower:
+                return "Okay, I can help you book. Which expert would you like to book with?", session_state, True, None
+            elif "refine" in user_msg_lower:
+                session_state["booking_step"] = "concern" # Go back to the first question or a specific refinement step
+                return "Okay, what would you like to change in your search criteria?", session_state, True, None
+            # If user says "ok" or something generic, re-prompt the options
+            return "What would you like to do next with the recommended experts?", session_state, True, None
+
+        # --- END NEW ---
+
+    # --- NEW PRIORITY 0.06: HANDLE PENDING EXPERT CONFIRMATION ---
+    # This block handles the user's response after ZuraAI has offered to suggest an expert post-crisis.
+    if session_state.get("awaiting_expert_confirmation"):
+        affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "book", "suggest"]
+        negative_responses = ["no", "no thanks", "not now", "not really", "i don't want to", "i don't need"]
+
+        if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+            session_state["awaiting_expert_confirmation"] = False # Clear the flag
+            # Initiate Therapist Booking flow
+            session_state["active_flow"] = "therapist_booking"
+            session_state["booking_preferences"] = {}
+            session_state["booking_step"] = "intro"
+            reply = (
+                "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+                "I'll just need to ask a few quick questions. Is that okay?"
+            )
+            return reply, session_state, True, None
+        elif any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in negative_responses):
+            session_state["awaiting_expert_confirmation"] = False # Clear the flag
+            session_state["active_flow"] = None # Ensure no flow is active
+            return "Okay, no problem. What would you like to do instead?", session_state, True, None
+        else:
+            # User said something unclear, re-ask or clarify
+            return "I'm sorry, I didn't quite catch that. Would you like me to suggest a mental-health professional?", session_state, True, None
+
+    # --- NEW PRIORITY 0.07: HANDLE PENDING WELLNESS FLOW CONFIRMATION ---
+    # This block handles the user's response after ZuraAI has offered a wellness activity.
+    if session_state.get("awaiting_confirmation") and session_state.get("pending_flow") and not should_handle_booking:
+        # This check ensures we don't clash with the expert confirmation logic which has its own state.
+        if not session_state.get("awaiting_expert_confirmation"):
+            affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "try it", "we can try", "let's try"]
+            negative_responses = ["no", "no thanks", "not now", "not really", "i don't want to", "i don't need"]
+
+            if any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+                # User confirmed. Start the pending flow.
+                active_flow = session_state.pop("pending_flow")
+                session_state["awaiting_confirmation"] = False
+                session_state["active_flow"] = active_flow
+                session_state["current_step"] = 0 # Always start a new flow at step 0
+                session_state["media_session_active"] = False
+
+                # Get the first step of the flow and return it.
+                next_text = get_next_flow_step(active_flow, 0)
+                if next_text:
+                    session_state["current_step"] = 1
+                    session_state["last_exercise"] = active_flow
+                    return next_text, session_state, True, None
+                else: # Flow has no steps? End it.
+                    session_state["active_flow"] = None
+                    return "It seems there was an issue starting that activity. What would you like to do instead?", session_state, True, None
+
+            elif any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in negative_responses):
+                # User declined the pending flow.
+                pending_flow = session_state.pop("pending_flow", "an activity")
+                session_state["awaiting_confirmation"] = False
+                
+                # Mark the exercise as refused
+                refused = session_state.get("refused_exercises", [])
+                if pending_flow not in refused:
+                    refused.append(pending_flow)
+                session_state["refused_exercises"] = refused
+                
+                # Offer alternatives
+                reply = (
+                    "That's completely okay. We don't have to do that.\n\n"
+                    "Would you prefer to talk about what's on your mind, try a different kind of calming technique, or perhaps get some support from a Mibo expert?"
+                )
+                return reply, session_state, True, None
+            else:
+                # If the response is unclear, re-prompt for clarity.
+                pending_flow_name = session_state.get("pending_flow", "a wellness activity").replace("_", " ")
+                return f"Sorry, I didn't quite catch that. Would you like to try the {pending_flow_name} activity?", session_state, True, None
+
+    # --- NEW PRIORITY 0.08: CRITICAL RISK INTERVENTION (main crisis handling) ---
+    # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
+    # Activation:
+    # This is the entry point into the crisis flow.
+    is_critical_risk_signal = intent_data.get("risk_level") == "critical"
+    is_new_crisis = active_flow != "crisis_support"
+
+    if is_critical_risk_signal and is_new_crisis:
+        session_state["crisis_state"] = {"status": CRISIS_STATUS_DETECTED}
+        session_state["active_flow"] = "crisis_support" # Prioritizes this flow
+        user_name_for_flow = user_name or session_state.get("user_name", "there")
+        message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+        session_state["crisis_state"]["status"] = CRISIS_STATUS_HELP_SHOWN
+        return message, session_state, True, None
+    
+    if active_flow == "crisis_support":
+        crisis_state = session_state["crisis_state"]
+        user_name_for_flow = user_name or session_state.get("user_name", "there")
+        current_crisis_status = crisis_state.get("status")
+
+        IMMEDIATE_DANGER_PHRASES = [
+            "i'm not safe", "i am not safe", "no i'm not safe", "not safe", "i'm not safe now",
+            "i'm not okay", "i am not okay",
+            "i'm alone", "i am alone", "always alone",
+            "this is my last message", "last message", "last messgase", # Includes user typo
+            "i can't do this anymore", "i give up", "i want to die", "i want to end my life",
+            "i'm going to hurt myself", "i'm going to kill myself", "i don't want to live",
+            "there's no point", "no point in living", "i wish i was dead", "i just want it to end",
+            "i can't go on", "i'm done", "i'm giving up", "i'm so tired of fighting",
+            "i'm in so much pain", "i can't take it anymore", "i need to escape",
+            "i'm a burden", "everyone would be better off without me", "i don't belong here",
+            "i feel trapped", "i have no hope", "i'm worthless", "i'm a failure",
+            "i'm ready to go", "i'm ready to leave", "i'm ready to check out",
+            "i'm planning to", "i have a plan", "i'm thinking about how to",
+            "i'm going to do it", "i will do it", "i'm serious", "this isn't a joke",
+            "i'm not kidding", "i'm not playing", "i'm not well", "i'm not okay",
+            "i'm not good", "i'm not feeling good", "i'm not feeling well",
+            "i'm not feeling okay", "i'm not feeling alright", "i'm not feeling right",
+            "i'm not feeling myself", "i'm not feeling like myself", "i'm not feeling like i used to",
+            "i'm not feeling like i should", "i'm not feeling like i want to",
+            "goodbye", "good bye", "goodby",
+            "i can't go on", "no point", "end it all"
+        ]
+        # "no" is a strong danger signal if asked "Are you safe?"
+        is_immediate_danger = any(phrase in user_msg_lower for phrase in IMMEDIATE_DANGER_PHRASES) or (user_msg_lower == "no" and current_crisis_status in [CRISIS_STATUS_SAFETY_CHECK, CRISIS_STATUS_PENDING_RESOLUTION])
+        
+        # --- INTENT-FIRST HANDLING ---
+        # These checks have priority over generic state-based responses.
+
+        # PRIORITY 0.1: Handle explicit request for emergency contacts
+        if intent_data.get("intent") == "CRISIS_EMERGENCY_CONTACT_REQUEST":
+            crisis_state["status"] = CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 2) # Use the dedicated emergency contact message
+            return message, session_state, True, None
+
+        # PRIORITY 0.2: Handle explicit safety confirmation
+        if is_explicit_safety_confirmation:
+            # If a booking was pending, resolving the crisis will automatically
+            # re-process that intent on the next turn. We can give a more contextual reply.
+            if crisis_state.get("pending_normal_intent"):
+                reply = "Thank you for confirming. I'm glad you're safe. We can now continue with finding an expert for you."
+            else:
+                # If no intent was pending, we proactively offer to start the process.
+                reply = "I'm glad you're feeling safer. If you'd like, we can now help you connect with a mental-health professional. Would you like me to suggest an expert?"
+                session_state["awaiting_expert_confirmation"] = True # Set the flag here
+
+            session_state["crisis_state"]["status"] = CRISIS_STATUS_RESOLVED # Mark as resolved
+            session_state["active_flow"] = None # Exit the crisis flow
+            # The top-level CRISIS_RESOLUTION_CHECK will handle clearing the state
+            # and processing any pending intents on the *next* message.
+            return reply, session_state, True, None
+
+        # PRIORITY 0.3: Handle immediate danger signals (escalation)
+        if is_immediate_danger and current_crisis_status != CRISIS_STATUS_IMMEDIATE_DANGER:
+            crisis_state["status"] = CRISIS_STATUS_IMMEDIATE_DANGER
+            session_state["crisis_state"] = crisis_state
+            message_template = get_next_flow_step("crisis_support", 5)
+            message = message_template.replace("{user_name}", user_name_for_flow) if message_template else (f"{user_name_for_flow}, I'm very concerned because you said you're not safe and you're alone. Please don't stay alone right now. "
+                           "Move to a place where other people are present and contact emergency support immediately. "
+                           "If you can, call someone you trust and ask them to stay with you. Please do not hurt yourself while you're getting help.")
+            return message, session_state, True, None
+
+        # PRIORITY 0.4: Handle "help unavailable"
+        unavailable_keywords = ["not available", "isn't available", "not working", "unavailable"]
+        if any(keyword in user_msg_lower for keyword in unavailable_keywords):
+            crisis_state["status"] = CRISIS_STATUS_HELP_UNAVAILABLE
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 3)
+            return message, session_state, True, None
+
+        # PRIORITY 0.5: Intercept normal booking intents during crisis
+        # This is the key change to prevent repeating crisis messages when user tries to pivot.
+        is_normal_booking_intent = intent_data.get("intent") in ["Doctor Booking", "Therapist Booking"]
+        if is_normal_booking_intent and current_crisis_status in [CRISIS_STATUS_DETECTED, CRISIS_STATUS_HELP_SHOWN, CRISIS_STATUS_HELP_UNAVAILABLE, CRISIS_STATUS_HELP_CONTACTED, CRISIS_STATUS_SAFETY_CHECK]:
+            # If a normal intent is detected while in an active crisis state (but not immediate danger)
+            # Transition to PENDING_RESOLUTION and ask for safety.
+            crisis_state["status"] = CRISIS_STATUS_PENDING_RESOLUTION
+            crisis_state["pending_normal_intent"] = intent_data.get("intent") # Store the original intent
+            crisis_state["pending_user_preferences"] = intent_data.get("user_preferences", {}) # Store preferences
+            session_state["crisis_state"] = crisis_state
+            print(f"DEBUG: Intercepted normal intent '{intent_data.get('intent')}' during crisis (status: {current_crisis_status}). Asking for safety.")
+            return "I can help you connect with an expert. Before we continue, I need to check one thing: are you safe right now?", session_state, True, None
+
+        # PRIORITY 0.6: Handle "help contacted"
+        contacted_keywords = ["i contacted", "i've contacted", "contacted help", "i called", "i'm talking to", "i reached out"]
+        if any(keyword in user_msg_lower for keyword in contacted_keywords):
+            crisis_state["status"] = CRISIS_STATUS_HELP_CONTACTED
+            session_state["crisis_state"] = crisis_state
+            message = get_next_flow_step("crisis_support", 4)
+            if message:
+                message = message.replace("{user_name}", user_name_for_flow)
+            else:
+                # Fallback message if the flow step is missing
+                message = f"I'm so glad you reached out for help, {user_name_for_flow}. Please stay with the person or support service you've contacted. Are you safe right now?"
+            return message, session_state, True, None
+
+        # --- STATE-BASED FALLBACKS for generic messages ---
+        # These run if no specific intent was detected above.
+
+        # If in immediate danger, and user says something generic, transition to safety check. Otherwise, repeat danger msg.
+        if current_crisis_status == CRISIS_STATUS_IMMEDIATE_DANGER:
+            if is_continuation:
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+                session_state["crisis_state"] = crisis_state
+                return "I'm still here with you. Your safety is the most important thing. Are you safe right now?", session_state, True, None
+            else:
+                # Repeat the immediate danger message (ensure message is assigned)
+                message = get_next_flow_step("crisis_support", 5).replace("{user_name}", user_name_for_flow)
+                return message, session_state, True, None
+
+        # If user tried to book an expert, we are waiting for a safety confirmation.
+        if current_crisis_status == CRISIS_STATUS_PENDING_RESOLUTION:
+            return "Your safety is my top priority. I need to confirm you are safe before we can move on. Are you safe right now?", session_state, True, pending_intent_to_process
+
+        if current_crisis_status == CRISIS_STATUS_SAFETY_CHECK:
+            # If user says "yes" (caught by is_explicit_safety_confirmation above), it resolves.
+            # If user says "no" (caught by is_immediate_danger above), it escalates.
+            # If user says something else, re-ask for safety.
+            # This is the persistent message for safety check.
+            if not is_explicit_safety_confirmation and not is_immediate_danger:
+                # Provide more context if the user gives an unclear answer like "what" or "no need".
+                return "I'm asking because your safety is my highest priority. Before we continue, I need to make sure you are not in immediate danger. Are you safe right now?", session_state, True, pending_intent_to_process
+        
+        if current_crisis_status == CRISIS_STATUS_HELP_UNAVAILABLE and is_continuation:
+            crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+            session_state["crisis_state"] = crisis_state
+            return "You're welcome. I'm glad you told me what happened. Are you safe right now?", session_state, True, None
+
+        if current_crisis_status == CRISIS_STATUS_HELP_CONTACTED and is_continuation: # Ensure message is assigned
+            crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+            session_state["crisis_state"] = crisis_state
+            return "I'm glad you reached out. Are you safe right now?", session_state, True, None
+
+        if current_crisis_status == CRISIS_STATUS_EMERGENCY_CONTACT_INFO_PROVIDED:
+            if is_continuation: # User acknowledged the info, now ask for safety
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK
+                session_state["crisis_state"] = crisis_state
+                return "Thank you. Are you safe right now?", session_state, True, None
+            # If not a continuation, and not a safety confirmation, re-iterate and ask for safety (ensure message is assigned)
+            return get_next_flow_step("crisis_support", 2), session_state, True, None # Repeat the emergency info
+
+        if current_crisis_status == CRISIS_STATUS_HELP_SHOWN:
+            if is_continuation:
+                crisis_state["status"] = CRISIS_STATUS_SAFETY_CHECK # Move to safety check after initial ack
+                session_state["crisis_state"] = crisis_state
+                return "Thank you for acknowledging. Your safety is the most important thing. Are you safe right now?", session_state, True, None # Ensure message is assigned
+            else: # If user says something else, repeat the persistent short message
+                return get_next_flow_step("crisis_support", 1), session_state, True, None
+
+        # Final fallback for any unhandled crisis state
+        return get_next_flow_step("crisis_support", 1), session_state, True, None
+
+    # --- END CRISIS HANDLING ---
+    # 0. Identify Continuations and Stops early
+    # Negative Feedback Detection (No improvement after exercise)
+    negative_feedback = ["no change", "no changes", "still stressed", "not working", "didn't help", "no better", "still feel", "no difference"]
+    has_negative_feedback = any(f in user_msg_lower for f in negative_feedback)
+    is_stop = any(word in user_msg_lower for word in ["stop", "cancel", "exit", "quit", "no more", "nevermind", "end this", "don't want to"])
+
+    # 2. Stop/Cancel Check
+    if is_stop:
+        active_flow = session_state.get("active_flow")
+        if active_flow:
+            refused = session_state.get("refused_exercises", [])
+            if active_flow not in refused:
+                refused.append(active_flow)
+            session_state["refused_exercises"] = refused
+            
+        session_state["active_flow"] = None
+        session_state["active_assessment"] = None
+        session_state["pending_flow"] = None
+        session_state["awaiting_confirmation"] = False
+        session_state["current_step"] = 0 # Reset current step for the flow
+        return "Of course. We can stop here. What would you like to do instead?", session_state, True, None
+
+    # 3. Assessment Logic
+    active_assessment = session_state.get("active_assessment")
+    if active_assessment:
+        current_step = session_state.get("assessment_step", 0)
+        total_score = session_state.get("assessment_score", 0)
+        assessment_answers = session_state.get("assessment_answers", [])
+        
+        # Try to parse numeric (0-3) or letter (A-D) answer
+        match = re.search(r"\b([0-3a-dA-D])\b", user_msg_lower)
+        if match:
+            raw_answer = match.group(1).upper() # Ensure raw_answer is uppercase for 'A'-'D'
+            
+            # Handle emergency override for onboarding Q3
+            if active_assessment == "onboarding" and current_step == 2 and raw_answer == 'D':
+                # This is a critical risk signal. Activate the full crisis protocol.
+                session_state["active_assessment"] = None # Exit assessment
+                session_state["critical_risk_active"] = True
+                session_state["active_flow"] = "crisis_support"
+                session_state["current_step"] = 0 # Start the crisis flow from the beginning
+                
+                # Return the first message of the crisis flow directly.
+                user_name_for_flow = user_name or session_state.get("user_name", "there")
+                escalation_message = get_next_flow_step("crisis_support", 0).replace("{user_name}", user_name_for_flow)
+                session_state["current_step"] = 1 # We've sent step 0, now waiting for response.
+                return escalation_message, session_state, True, None
+
+            # Convert letter to score if needed for standard assessments (A=0, B=1, etc.)
+            # Or just store the raw answer for onboarding
+            if raw_answer.isdigit():
+                score = int(raw_answer)
+            else:
+                score = ord(raw_answer) - ord('A')
+            
+            total_score += score
+            assessment_answers.append(raw_answer)
+            current_step += 1
+            
+            next_question = assessment_service.get_assessment_question(active_assessment, current_step)
+            if next_question:
+                session_state["assessment_step"] = current_step
+                session_state["assessment_score"] = total_score
+                session_state["assessment_answers"] = assessment_answers
+                
+                # Special empathy touches for onboarding (after Q4, before Q5)
+                if active_assessment == "onboarding":
+                    if current_step == 4: # After Q4, before Q5
+                        next_question = "Thanks for being honest. Almost done.\n\n" + next_question
+                
+                return next_question, session_state, True, pending_intent_to_process
+            else:
+                # Assessment finished
+                user_id = session_state.get("user_id", 1) # Default for safety, should be set in session
+
+                if active_assessment == "onboarding":
+                    route = assessment_service.calculate_onboarding_route(assessment_answers)
+                    result_category = route["tier"]
+                    
+                    if db:
+                        try:
+                            from app.models.user_model import User
+                            user = db.query(User).filter(User.id == user_id).first()
+                            if user:
+                                user.onboarding_completed = True
+                                user.tier = route["tier"]
+                                user.onboarding_layer = route["layer"]
+                                user.support_preference = route.get("privacy_preference")
+                                if route["tier"] == "Premium":
+                                    user.premium_status = True
+                            
+                            from app.models.assessment_model import UserIntakeAssessment
+                            intake_record = UserIntakeAssessment(
+                                user_id=user_id,
+                                q1=assessment_answers[0] if len(assessment_answers) > 0 else None,
+                                q2=assessment_answers[1] if len(assessment_answers) > 1 else None,
+                                q3=assessment_answers[2] if len(assessment_answers) > 2 else None,
+                                q4=assessment_answers[3] if len(assessment_answers) > 3 else None,
+                                q5=assessment_answers[4] if len(assessment_answers) > 4 else None,
+                                q6=assessment_answers[5] if len(assessment_answers) > 5 else None,
+                                q7=assessment_answers[6] if len(assessment_answers) > 6 else None,
+                                route_tier=route["tier"],
+                                route_layer=route["layer"],
+                                interest_tags=route.get("interest_tags"),
+                                privacy_preference=route.get("privacy_preference")
+                            )
+                            db.add(intake_record)
+                            db.commit()
+                        except Exception as e:
+                            print(f"Error saving onboarding result: {e}")
+                            db.rollback()
+
+                    # Mapping tiers to friendly results
+                    tier_responses = {
+                        "Psychiatric": "Based on what you've shared, I recommend starting with our clinical team for a clinical assessment and possible medication support.",
+                        "Psychological": "It sounds like psychological support through therapy and counseling would be a great next step for you.",
+                        "Premium": "Welcome to The Prime Project. We'll provide you with private, concierge-level care.",
+                        "Non-clinical": "I've tailored a plan focused on mindfulness, sleep, mood, courses, and habits to help you feel your best."
+                    }
+                    reply = (
+                        f"Thank you for completing the check-in. {tier_responses.get(result_category, '')}\n\n"
+                        f"I've set your primary focus to **{route.get('layer', 'Mibo Main')}**.\n\n"
+                        "How would you like to begin? I can show you how to book a session, or we can start with a calming activity."
+                    )
+                else:
+                    result_category = assessment_service.get_assessment_result(active_assessment, total_score)
+                    
+                    if db:
+                        try:
+                            from app.models.assessment_model import AssessmentResult
+                            res = AssessmentResult(
+                                user_id=user_id,
+                                assessment_type=active_assessment,
+                                score=total_score,
+                                result_category=result_category
+                            )
+                            db.add(res)
+                            db.commit()
+                        except Exception as e:
+                            print(f"Error saving assessment result: {e}")
+                            db.rollback()
+
+                    # Opinionated next steps based on result
+                    next_flow = None
+                    if active_assessment == "stress":
+                        if result_category == "Moderate Stress":
+                            next_flow = "compact_breathing"
+                        elif result_category == "High Stress":
+                            next_flow = "box_breathing"
+                        else:
+                            next_flow = "breathing"
+                    elif active_assessment == "anxiety":
+                        if result_category in ["Moderate Anxiety", "Severe Anxiety"]:
+                            next_flow = "grounding"
+                        else:
+                            next_flow = "478_breathing"
+
+                    if next_flow:
+                        session_state["pending_flow"] = next_flow
+                        session_state["awaiting_confirmation"] = True
+                        
+                        flow_label = next_flow.replace("_", " ").capitalize()
+                        reply = (
+                            f"**{active_assessment.capitalize()} Check Result: {result_category}**\n\n"
+                            f"It sounds like {active_assessment} has been weighing on you lately. Knowing this helps me support you better.\n\n"
+                            f"Let's take a moment together to settle your mind. I'd like to guide you through a quick {flow_label}. Ready to try?"
+                        )
+                    else:
+                        reply = (
+                            f"**{active_assessment.capitalize()} Check Result: {result_category}**\n\n"
+                            f"It sounds like {active_assessment} has been affecting you more than usual recently. Knowing this helps me support you better.\n\n"
+                            "I can guide you through some techniques that may help right now, such as a short breathing exercise or a grounding activity. What would you like to try?"
+                        )
+                
+                # Store result for database persistence
+                session_state["last_assessment_result"] = {
+                    "assessment_type": active_assessment,
+                    "score": total_score,
+                    "result_category": result_category,
+                    "answers": assessment_answers
+                }
+
+                # Reset assessment state
+                session_state["active_assessment"] = None
+                session_state["assessment_step"] = 0
+                session_state["assessment_score"] = 0
+                session_state["assessment_answers"] = []
+                
+                return reply, session_state, True, pending_intent_to_process
+        else:
+            valid_range = "A to D" if active_assessment == "onboarding" else "0 to 3"
+            return f"Please provide an answer from {valid_range} so I can calculate my result accurately.", session_state, True, pending_intent_to_process
+    elif user_msg_lower == "media_finished": # 4. Media Session Follow-up
+        session_state["media_session_active"] = False
+        return "Welcome back. How are you feeling now?", session_state, True, pending_intent_to_process # This was already here.
+
+    # --- NEW PRIORITY 0.5: ACTIVE WELLNESS FLOW CONTINUATION ---
+    # This block handles the continuation of interactive wellness flows (not booking or assessment, which are handled above).
+    if active_flow and active_flow not in ["therapist_booking", "doctor_booking"]: # Ensure it's not a booking flow
+        # Rule: If it's an interactive flow, ANY non-greeting/stop input progresses it.
+        # EXCEPTION: For interactive flows, a simple "ok" or "yes" should NOT advance the step
+        # unless it was the activation message (just_activated).
+        is_interactive = active_flow in INTERACTIVE_FLOWS
+        just_activated = False # This flag is no longer set, but the logic below is still valid.
+        is_simple_confirmation = user_msg_lower in ["ok", "okay", "yes", "yeah", "sure", "yep", "yup", "ready"]
+        
+        if is_interactive and is_simple_confirmation and not just_activated:
+            # Re-send the current step instructions instead of advancing
+            return get_next_flow_step(active_flow, current_step - 1 if current_step > 0 else 0), session_state, True, pending_intent_to_process
+
+        # Special Case: User reports no improvement during or after a flow
+        if has_negative_feedback:
+            # Find a DIFFERENT exercise to suggest
+            available_exercises = ["grounding", "tension_release", "body_scan", "478_breathing", "box_breathing"]
+            next_flow = "grounding" # Default fallback
+            
+            last_ex = session_state.get("last_exercise") or active_flow
+            for ex in available_exercises:
+                if ex != last_ex and ex not in session_state.get("refused_exercises", []):
+                    next_flow = ex
+                    break
+            
+            session_state["active_flow"] = None
+            session_state["pending_flow"] = next_flow
+            session_state["awaiting_confirmation"] = True
+            session_state["current_step"] = 0
+            
+            flow_labels = {
+                "grounding": "grounding exercise (5-4-3-2-1)",
+                "tension_release": "muscle tension release",
+                "body_scan": "gentle body scan",
+                "478_breathing": "4-7-8 breathing technique",
+                "box_breathing": "box breathing reset"
+            }
+            label = flow_labels.get(next_flow, "calming technique")
+            
+            return (
+                "Thank you for being honest with me. It's completely okay that the last exercise didn't quite hit the mark—everyone's mind responds differently.\n\n"
+                f"Let's try a different approach. How about we try a {label} together? It might help shift things in a way the breathing didn't. Ready to try?"
+            ), session_state, True, pending_intent_to_process
+
+        if not is_continuation and not is_interactive:
+            # User is likely trying to pivot or chat
+            session_state["active_flow"] = None
+            session_state["current_step"] = 0
+            return None, session_state, False, pending_intent_to_process
+
+        next_text = get_next_flow_step(active_flow, current_step)
+        if next_text:
+            session_state["current_step"] = current_step + 1
+            session_state["last_exercise"] = active_flow # Track the last exercise
+            return next_text, session_state, True, None
+        else:
+            # Flow finished
+            completed = session_state.get("completed_exercises", [])
+            if active_flow not in completed:
+                completed.append(active_flow)
+            session_state["completed_exercises"] = completed
+            
+            session_state["active_flow"] = None
+            session_state["current_step"] = 0
+            session_state["media_session_active"] = False 
+            return None, session_state, False, pending_intent_to_process # Flow finished, let AI take over
+
+    return None, session_state, False, pending_intent_to_process # Default return for handle_flow_logic
             session_state.pop("booking_step", None)
             return reply, session_state, True, None
 

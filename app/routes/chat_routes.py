@@ -150,22 +150,6 @@ async def chat(
     
     user_message = data.message.strip()
 
-    # 1. Pre-AI Flow Interception (Handles ongoing flows, crisis, etc.)
-    flow_reply, session_state, flow_active, pending_intent = handle_flow_logic(
-        user_message, session_state, intent_data={}, db=db, user_name=user_name_val
-    )
-
-    if flow_active:
-        save_chat_history(db, current_user.id, user_message, flow_reply, session_state.get("last_emotion", "neutral"))
-        save_session_state(current_user.id, session_state)
-        active_flow_name = session_state.get("active_flow", "FLOW")
-        return await construct_chat_response(
-            flow_reply, session_state.get("last_emotion", "neutral"), "continuation", "low",
-            active_flow_name.upper() if active_flow_name else "FLOW",
-            {"type": "CONTINUE_FLOW", "flow": active_flow_name},
-            {"exercise": flow_reply, "type": "Flow"}, voice_enabled, current_user.id
-        )
-
      # 2. Context Gathering for AI
     t_context = time.time()
     is_substantive = len(user_message) > 10
@@ -210,7 +194,7 @@ async def chat(
     analysis = unified_output.get("analysis", {})
     current_emotion = analysis.get("emotion", "neutral")
 
-    # 4. Post-AI DB Updates & Voice Generation
+    # 4. Prepare for Flow Logic & Post-AI DB Updates
     voice_task = None
     ai_reply = unified_output.get("reply") or "I'm here for you. How are you feeling?"
     if voice_enabled and ai_reply:
@@ -230,7 +214,7 @@ async def chat(
         track_wellness_progress(db, current_user.id, last_ex, last_ex.replace("_", " ").capitalize(), feedback=user_message)
         session_state["last_exercise"] = None
 
-    # 5. Post-AI Flow Logic (Handles flow *initiation*)
+    # 5. Authoritative Flow Orchestration (Single Call after AI Analysis)
     t_flow = time.time()
     intent_data = {
         "intent": analysis.get("intent", "General chat"),
@@ -239,10 +223,13 @@ async def chat(
     }
     emotion_data = {"emotion": current_emotion, "severity": analysis.get("severity_score", 0.2)}
 
-    if pending_intent:
-        intent_data["intent"] = pending_intent.get("intent")
-        intent_data["user_preferences"] = pending_intent.get("user_preferences", {})
+    # Handle pending intent from crisis (if any)
+    pending_intent_from_session = session_state.get("crisis_state", {}).get("pending_normal_intent_data")
+    if pending_intent_from_session:
+        intent_data["intent"] = pending_intent_from_session.get("intent")
+        intent_data["user_preferences"] = pending_intent_from_session.get("user_preferences", {})
         print(f"DEBUG: Overriding AI intent with pending crisis intent: {intent_data['intent']}")
+        session_state["crisis_state"].pop("pending_normal_intent_data", None) # Clear after use
 
     flow_reply, session_state, flow_active, _ = handle_flow_logic(
         user_message, session_state, intent_data, emotion_data, db=db, user_name=user_name_val
@@ -254,15 +241,24 @@ async def chat(
     recommended_feature = unified_output.get("recommended_feature") or "NONE"
 
     if flow_active:
-        if voice_task: voice_task.cancel()  # Cancel original voice task
         final_reply = flow_reply
         active_flow_name = session_state.get("active_flow", "FLOW")
         action = {"type": "CONTINUE_FLOW", "flow": active_flow_name}
         recommended_feature = active_flow_name.upper() if active_flow_name else "FLOW"
+        # If flow is active, its reply takes precedence, and we might need to generate voice for it.
+        if voice_enabled and final_reply:
+            if voice_task: voice_task.cancel() # Cancel original AI voice task
+            voice_task = asyncio.create_task(text_to_speech(final_reply, voice="nova"))
     else:
         suggested_flow = unified_output.get("suggested_flow")
         if suggested_flow and suggested_flow not in ["null", "flow_id_or_null"]:
-            session_state.update({"active_flow": None, "pending_flow": suggested_flow, "awaiting_confirmation": True, "current_step": 0})
+            session_state.update({
+                "active_flow": None, # Ensure no active flow, it's just pending
+                "pending_flow": suggested_flow,
+                "awaiting_confirmation": True,
+                "current_step": 0,
+                "current_need": current_emotion # Store context for potential expert booking
+            })
 
     # 6. Final State Save & Response
     suggested_flow = unified_output.get("suggested_flow")
@@ -274,16 +270,14 @@ async def chat(
     background_tasks.add_task(save_memory, current_user.id, user_message, current_emotion, intent_data["intent"])
 
     
-    audio_base64 = None
-    if voice_task and not voice_task.cancelled():
+    audio_base64 = None # Initialize audio_base64
+    if voice_task:
         t_voice = time.time()
         try:
             audio_base64 = await voice_task
         except Exception as e:
             print(f"Async Voice Error: {e}")
         print(f"DEBUG: Voice Wait took {time.time() - t_voice:.4f}s")
-    elif flow_active and voice_enabled and final_reply:
-        audio_base64 = await text_to_speech(final_reply, voice="nova")
 
     print(f"DEBUG: TOTAL Processing took {time.time() - t_start:.4f}s")
     return {
