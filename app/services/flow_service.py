@@ -563,6 +563,19 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                     session_state["booking_step"] = "booking_guidance_shown"
                     return f"Great! To book an appointment with {chosen_expert['name']}, please visit the Mibo app. I can guide you there.", session_state, True, pending_intent_to_process
 
+            # Handle ambiguous confirmations like "ok" by re-prompting
+            ambiguous_confirmations = ["ok", "okay", "yes", "yeah", "sure", "yep", "yup"]
+            is_ambiguous_confirmation = any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in ambiguous_confirmations)
+
+            if is_ambiguous_confirmation:
+                reply = (
+                    "Sure. What would you like to do with the recommended experts?\n\n"
+                    "• View an expert's full profile\n"
+                    "• Compare the recommended experts\n"
+                    "• Book an appointment"
+                )
+                return reply, session_state, True, pending_intent_to_process
+
             if "compare" in user_msg_lower:
                 comparison_text = "Here’s a comparison of the recommended experts:\n\n"
                 for i, expert in enumerate(recommended_experts):
