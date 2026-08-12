@@ -16,7 +16,7 @@ def map_concern_to_role_and_specialization(concern: str, severity: str) -> (Opti
         return "Psychiatrist", [concern]
 
     if "relationship" in concern_lower or "family" in concern_lower or "couples" in concern_lower:
-        return "Relationship Counsellor", ["Relationship Issues", "Couples Therapy"]
+        return "Clinical Psychologist", ["Relationship Issues", "Couples Therapy", "Family Therapy"]
 
     if "child" in concern_lower or "teen" in concern_lower or "adolescent" in concern_lower:
         return "Clinical Psychologist", ["Child and Adolescent Psychiatry", "Behavioural Issues"]

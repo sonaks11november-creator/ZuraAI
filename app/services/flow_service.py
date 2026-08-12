@@ -703,12 +703,17 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             final_reply = ""
 
             if not experts:
-                recommendation_intro = (
-                    "I'm sorry, but I couldn't find any experts matching your primary need right now. "
-                    "This is unusual. We can try another wellness activity, or I can connect you with "
-                    "our support team to look into this."
+                # If no experts are found, end the flow gracefully and offer next steps.
+                # This prevents getting stuck in a loop on the next turn.
+                session_state["active_flow"] = None
+                session_state["booking_step"] = None
+                session_state["booking_preferences"] = {}
+                reply = (
+                    "I'm sorry, I couldn't find an expert who is an exact match for all your preferences right now. "
+                    "This can happen sometimes.\n\n"
+                    "Would you like me to try a broader search, perhaps with fewer constraints? Or we could try a different wellness activity."
                 )
-                final_reply = recommendation_intro
+                return reply, session_state, True, None
             else:
                 recommendation_intro = "Based on what you've shared, here are the experts I'd recommend:\n\n"
                 
