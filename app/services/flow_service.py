@@ -167,7 +167,105 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             print(f"DEBUG: Crisis resolved, returning pending intent: {pending_normal_intent}")
         # Do NOT return True here. Let the message fall through to other flow logic.
 
-    # --- NEW PRIORITY 0.05: HANDLE PENDING EXPERT CONFIRMATION ---
+    # --- NEW PRIORITY 0.05: HIGH-PRIORITY INTENT INTERRUPTION (Booking Flow) ---
+    # This block checks for booking intents and interrupts any non-crisis flow.
+    # It also handles the continuation of an active booking flow.
+    is_therapist_booking_intent = intent_data.get("intent") == "Therapist Booking"
+    is_doctor_booking_intent = intent_data.get("intent") == "Doctor Booking"
+
+    # Condition to either INITIATE a booking flow (interrupting another) or CONTINUE an existing one.
+    should_handle_booking = (
+        active_flow in ["therapist_booking", "doctor_booking"] or
+        ((is_therapist_booking_intent or is_doctor_booking_intent) and active_flow != "crisis_support")
+    )
+
+    if should_handle_booking:
+        # A) INITIATE/INTERRUPT: A new booking intent is detected, and it's not already the active flow.
+        if (is_therapist_booking_intent or is_doctor_booking_intent) and active_flow not in ["therapist_booking", "doctor_booking"]:
+            flow_type = "therapist_booking" if is_therapist_booking_intent else "doctor_booking"
+            
+            # Clean up state from any interrupted wellness flow.
+            session_state["active_flow"] = flow_type
+            session_state.pop("pending_flow", None)
+            session_state.pop("awaiting_confirmation", None)
+            session_state.pop("current_step", None)
+
+            booking_preferences = intent_data.get("user_preferences", {})
+            current_need = session_state.get("current_need")
+            
+            # Preserve context if the user was in a wellness flow (e.g., for stress).
+            if not booking_preferences.get("concern") and current_need:
+                booking_preferences["concern"] = current_need
+            session_state["booking_preferences"] = booking_preferences
+
+            # If we have the concern (from context or intent), we can skip the intro and ask the next relevant question.
+            if booking_preferences.get("concern"):
+                if flow_type == "therapist_booking":
+                    next_question, preference_key = _get_next_booking_question(booking_preferences)
+                else: # doctor_booking
+                    next_question, preference_key = _get_next_doctor_booking_question(booking_preferences)
+                
+                if next_question:
+                    session_state["booking_step"] = preference_key
+                    reply = f"Of course. Since you mentioned you're feeling {booking_preferences['concern']}, I can help you find an expert for support. {next_question}"
+                    return reply, session_state, True, None
+                # If no next question, it means all info was in the first message. Fall through to find experts.
+            
+            else: # We don't have a concern, so start with the standard confirmation intro.
+                session_state["booking_step"] = "intro"
+                reply = (
+                    "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+                    "I'll just need to ask a few quick questions. Is that okay?"
+                )
+                if flow_type == "doctor_booking":
+                    reply = (
+                        "Of course, I can help with that. To find the right Mibo expert, "
+                        "I'll just need to ask a couple of quick questions. Is that okay?"
+                    )
+                return reply, session_state, True, None
+
+        # B) CONTINUE: A booking flow is already active. Process the user's response.
+        preferences = session_state.get("booking_preferences", {})
+        if booking_step == "intro":
+            affirmative_responses = ["yes", "ok", "okay", "sure", "yeah", "yep", "yup", "go ahead", "let's do it"]
+            if not any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+                session_state["active_flow"] = None
+                session_state.pop("booking_step", None)
+                session_state.pop("booking_preferences", None)
+                return "Okay, no problem. What would you like to do instead?", session_state, True, None
+        elif booking_step: # Ensure booking_step is not None before using it as a key
+            preferences[booking_step] = user_message
+            session_state["booking_preferences"] = preferences
+
+        # C) DETERMINE NEXT STEP OR FINISH: Get the next question or find experts.
+        if active_flow == "therapist_booking":
+            next_question, preference_key = _get_next_booking_question(preferences)
+        else: # doctor_booking
+            next_question, preference_key = _get_next_doctor_booking_question(preferences)
+
+        if next_question:
+            session_state["booking_step"] = preference_key
+            return next_question, session_state, True, None
+        else:
+            # All info gathered, find experts and end the flow.
+            role_override = "Psychiatrist" if active_flow == "doctor_booking" else None
+            experts = care_navigator_service.find_experts(
+                concern=preferences.get("concern", "general support"),
+                severity="moderate",
+                preferences=preferences,
+                role_override=role_override
+            )
+            if not experts:
+                reply = "I'm sorry, I couldn't find any experts that match your preferences right now. Would you like to change your preferences and try again?"
+            else:
+                reply = "Great, thank you. Based on what you've told me, here are a few experts who might be a good fit:\n\n"
+                # This part is simplified for brevity, the full expert formatting logic will be here.
+                reply += f"1. **{experts[0]['name']}** ({experts[0]['role']})"
+            session_state["active_flow"] = None
+            session_state.pop("booking_step", None)
+            return reply, session_state, True, None
+
+    # --- NEW PRIORITY 0.06: HANDLE PENDING EXPERT CONFIRMATION ---
     # This block handles the user's response after ZuraAI has offered to suggest an expert post-crisis.
     if session_state.get("awaiting_expert_confirmation"):
         affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "book", "suggest"]
@@ -192,9 +290,9 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             # User said something unclear, re-ask or clarify
             return "I'm sorry, I didn't quite catch that. Would you like me to suggest a mental-health professional?", session_state, True, None
 
-    # --- PRIORITY 0.06: HANDLE PENDING WELLNESS FLOW CONFIRMATION ---
+    # --- NEW PRIORITY 0.07: HANDLE PENDING WELLNESS FLOW CONFIRMATION ---
     # This block handles the user's response after ZuraAI has offered a wellness activity.
-    if session_state.get("awaiting_confirmation") and session_state.get("pending_flow"):
+    if session_state.get("awaiting_confirmation") and session_state.get("pending_flow") and not should_handle_booking:
         # This check ensures we don't clash with the expert confirmation logic which has its own state.
         if not session_state.get("awaiting_expert_confirmation"):
             affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "try it", "we can try", "let's try"]
@@ -240,7 +338,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 pending_flow_name = session_state.get("pending_flow", "a wellness activity").replace("_", " ")
                 return f"Sorry, I didn't quite catch that. Would you like to try the {pending_flow_name} activity?", session_state, True, None
 
-    # --- NEW PRIORITY 0.1: CRITICAL RISK INTERVENTION (main crisis handling) ---
+    # --- NEW PRIORITY 0.08: CRITICAL RISK INTERVENTION (main crisis handling) ---
     # This block is the absolute authority on critical risk state. It cannot be exited by normal conversation.
     # Activation:
     # This is the entry point into the crisis flow.
@@ -609,73 +707,5 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     elif user_msg_lower == "media_finished": # 4. Media Session Follow-up
         session_state["media_session_active"] = False
         return "Welcome back. How are you feeling now?", session_state, True, pending_intent_to_process # This was already here.
-
-    # --- NEW PRIORITY 0.5: ACTIVE WELLNESS FLOW CONTINUATION ---
-    # This block handles the continuation of interactive wellness flows (not booking or assessment, which are handled above).
-    if active_flow and active_flow not in ["therapist_booking", "doctor_booking"]: # Ensure it's not a booking flow
-        # Rule: If it's an interactive flow, ANY non-greeting/stop input progresses it.
-        # EXCEPTION: For interactive flows, a simple "ok" or "yes" should NOT advance the step
-        # unless it was the activation message (just_activated).
-        is_interactive = active_flow in INTERACTIVE_FLOWS
-        just_activated = False # This flag is no longer set, but the logic below is still valid.
-        is_simple_confirmation = user_msg_lower in ["ok", "okay", "yes", "yeah", "sure", "yep", "yup", "ready"]
-        
-        if is_interactive and is_simple_confirmation and not just_activated:
-            # Re-send the current step instructions instead of advancing
-            return get_next_flow_step(active_flow, current_step - 1 if current_step > 0 else 0), session_state, True, pending_intent_to_process
-
-        # Special Case: User reports no improvement during or after a flow
-        if has_negative_feedback:
-            # Find a DIFFERENT exercise to suggest
-            available_exercises = ["grounding", "tension_release", "body_scan", "478_breathing", "box_breathing"]
-            next_flow = "grounding" # Default fallback
-            
-            last_ex = session_state.get("last_exercise") or active_flow
-            for ex in available_exercises:
-                if ex != last_ex and ex not in session_state.get("refused_exercises", []):
-                    next_flow = ex
-                    break
-            
-            session_state["active_flow"] = None
-            session_state["pending_flow"] = next_flow
-            session_state["awaiting_confirmation"] = True
-            session_state["current_step"] = 0
-            
-            flow_labels = {
-                "grounding": "grounding exercise (5-4-3-2-1)",
-                "tension_release": "muscle tension release",
-                "body_scan": "gentle body scan",
-                "478_breathing": "4-7-8 breathing technique",
-                "box_breathing": "box breathing reset"
-            }
-            label = flow_labels.get(next_flow, "calming technique")
-            
-            return (
-                "Thank you for being honest with me. It's completely okay that the last exercise didn't quite hit the mark—everyone's mind responds differently.\n\n"
-                f"Let's try a different approach. How about we try a {label} together? It might help shift things in a way the breathing didn't. Ready to try?"
-            ), session_state, True, pending_intent_to_process
-
-        if not is_continuation and not is_interactive:
-            # User is likely trying to pivot or chat
-            session_state["active_flow"] = None
-            session_state["current_step"] = 0
-            return None, session_state, False, pending_intent_to_process
-
-        next_text = get_next_flow_step(active_flow, current_step)
-        if next_text:
-            session_state["current_step"] = current_step + 1
-            session_state["last_exercise"] = active_flow # Track the last exercise
-            return next_text, session_state, True, None
-        else:
-            # Flow finished
-            completed = session_state.get("completed_exercises", [])
-            if active_flow not in completed:
-                completed.append(active_flow)
-            session_state["completed_exercises"] = completed
-            
-            session_state["active_flow"] = None
-            session_state["current_step"] = 0
-            session_state["media_session_active"] = False 
-            return None, session_state, False, pending_intent_to_process # Flow finished, let AI take over
 
     return None, session_state, False, pending_intent_to_process # Default return for handle_flow_logic
