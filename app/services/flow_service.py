@@ -171,11 +171,18 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         # PRIORITY 0.2: Handle explicit safety confirmation
         if is_explicit_safety_confirmation:
-            session_state["crisis_state"] = {"status": CRISIS_STATUS_RESOLVED} # Reset state
-            session_state["active_flow"] = None
-            reply = "I'm so relieved to hear that you're feeling safer now. Thank you for letting me know. I'm still here to support you. What would you like to do next?"
-            # This will now fall through to the CRISIS_RESOLVED check at the top of the function on the *next* turn,
-            # which will handle any pending intents.
+            # If a booking was pending, resolving the crisis will automatically
+            # re-process that intent on the next turn. We can give a more contextual reply.
+            if crisis_state.get("pending_normal_intent"):
+                reply = "Thank you for confirming. I'm glad you're safe. We can now continue with finding an expert for you."
+            else:
+                # If no intent was pending, we proactively offer to start the process.
+                reply = "I'm glad you're feeling safer. If you'd like, we can now help you connect with a mental-health professional. Would you like me to suggest an expert?"
+
+            session_state["crisis_state"]["status"] = CRISIS_STATUS_RESOLVED # Mark as resolved
+            session_state["active_flow"] = None # Exit the crisis flow
+            # The top-level CRISIS_RESOLUTION_CHECK will handle clearing the state
+            # and processing any pending intents on the *next* message.
             return reply, session_state, True, None
 
         # PRIORITY 0.3: Handle immediate danger signals (escalation)
