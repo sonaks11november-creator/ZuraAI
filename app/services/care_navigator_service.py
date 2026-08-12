@@ -51,6 +51,9 @@ def find_experts(
         preferences = {}
 
     role, specializations = map_concern_to_role_and_specialization(concern, severity)
+    # Fix: Ensure role_override is applied if provided
+    # The original code had this, but the diff provided in the initial response removed it.
+    # Re-adding it here as it's a valid requirement.
     if role_override:
         role = role_override
     

@@ -168,6 +168,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                         "awaiting_confirmation": True,
                         "current_step": current_step,
                         "last_emotion": current_emotion,
+                        "current_need": current_emotion, # Store the emotion as current need
                         "last_severity": current_severity
                     })
                 else:
