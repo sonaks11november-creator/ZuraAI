@@ -124,7 +124,7 @@ WELLNESS_FLOWS = {
     "crisis_support": [
         # 0: Initial Escalation (CRISIS_SUICIDAL_INTENT)
         "{user_name}, I'm really concerned about your safety. Because you've said you want to end your life, please get immediate human support.\n\n"
-        "🆘 **Mibo Crisis Help — 24/7**\n"
+        "**Mibo Crisis Help — 24/7**\n"
         "Open the Mibo homepage and select **Crisis Help (24/7)** to contact the available crisis-support service.\n\n"
         "If Mibo Crisis Help isn't available or you cannot reach it:\n"
         "• Call **112** for emergency assistance in India, or go to the nearest emergency department.\n\n"
@@ -135,12 +135,12 @@ WELLNESS_FLOWS = {
         "I'm still here with you. Your safety is the most important thing. Please use one of the resources I shared. You don't have to go through this alone.",
 
         # 2: Dedicated Emergency Contact Info (CRISIS_EMERGENCY_CONTACT)
-        "🚨 **Emergency support**\n\n"
+        "**Emergency support**\n\n"
         "If you are in immediate danger, call **112** now or go to the nearest emergency department. For 24/7 mental-health support in India, you can also call **Tele-MANAS at 14416**. Please don't stay alone.",
 
         # 3: Fallback for when Mibo Crisis Help is unavailable (CRISIS_HELP_UNAVAILABLE)
         "Okay, thank you for letting me know. Please do not wait. Your safety is the most important thing right now.\n\n"
-        "🚨 **Please use these emergency options instead:**\n"
+        "**Please use these emergency options instead:**\n"
         "• Call **112** for immediate emergency assistance in India.\n"
         "• Go to the nearest emergency department.\n\n"
         "Please also move to a place where other people are present and ask someone you trust to stay with you.",
