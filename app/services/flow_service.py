@@ -416,14 +416,31 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     if is_doctor_booking_intent and not active_doctor_booking_flow:
         # The AI has already asked the first question. We just need to set the state.
         session_state["active_flow"] = "doctor_booking"
-        session_state["booking_preferences"] = intent_data.get("user_preferences", {})
-        session_state["booking_step"] = "concern" # Ready to receive the answer to the concern question
-        # The AI reply from the main loop will be sent, so we return None here to not override it.
-        # But we must return flow_active=True to prevent further processing.
-        # However, the AI reply is generated *after* this call in some loops, so we need to return the first question here.
-        # Let's return the first question from here to be safe and consistent with the therapist flow.
-        ai_reply = intent_data.get("reply") or "Of course, I can help with that. To find the right Mibo expert, could you tell me a bit more about the main health concern you're facing?"
-        return ai_reply, session_state, True, None
+
+        booking_preferences = intent_data.get("user_preferences", {})
+        # If no concern is in the current intent, check the session's last emotion.
+        if not booking_preferences.get("concern"):
+            last_emotion = session_state.get("last_emotion")
+            if last_emotion and last_emotion.lower().strip() not in ["neutral", "unknown"]:
+                booking_preferences["concern"] = last_emotion.capitalize()
+
+        session_state["booking_preferences"] = booking_preferences
+        next_question, question_type = _get_next_doctor_booking_question(booking_preferences)
+
+        if next_question:
+            session_state["booking_step"] = question_type
+            concern = booking_preferences.get("concern")
+            if concern:
+                reply = (f"I can help find a doctor for support with {concern}. "
+                         f"To find the right Mibo expert, I have a quick question for you.\n\n"
+                         f"{next_question}")
+            else: # Concern is not known, so the next_question is the concern question.
+                reply = (intent_data.get("reply") or
+                         "Of course, I can help with that. To find the right Mibo expert, could you tell me a bit more about the main health concern you're facing?")
+            return reply, session_state, True, None
+        else:
+            # All info gathered, fall through to find expert logic below
+            pass
 
     if active_doctor_booking_flow:
         preferences = session_state.get("booking_preferences", {})
@@ -432,7 +449,8 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         # This block handles the user's ANSWER to the previously asked question.
         if booking_step:
             if booking_step == "concern":
-                preferences["concern"] = user_message.strip()
+                ai_extracted_concern = intent_data.get("user_preferences", {}).get("concern")
+                preferences["concern"] = ai_extracted_concern or user_message.strip()
             elif booking_step == "language":
                 preferences["language"] = user_message.strip().capitalize()
 
@@ -487,13 +505,26 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     if is_booking_intent and not active_booking_flow:
         # Step 1 & 2: Detect intent and Acknowledge
         session_state["active_flow"] = "therapist_booking"
-        session_state["booking_preferences"] = intent_data.get("user_preferences", {})
+
+        booking_preferences = intent_data.get("user_preferences", {})
+        # If no concern is in the current intent, check the session's last emotion.
+        if not booking_preferences.get("concern"):
+            last_emotion = session_state.get("last_emotion")
+            if last_emotion and last_emotion.lower().strip() not in ["neutral", "unknown"]:
+                booking_preferences["concern"] = last_emotion.capitalize()
+
+        session_state["booking_preferences"] = booking_preferences
         session_state["booking_step"] = "intro" # Start with the intro acknowledgment
-        return (
-            "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
-            "I'll just need to ask a few quick questions. Is that okay?"
-        ), session_state, True, None
-    
+
+        concern = booking_preferences.get("concern")
+        if concern:
+            reply = (f"I can certainly help you find an expert for support with {concern}. "
+                     "To recommend someone who best matches your needs, I'll just need to ask a few quick questions. Is that okay?")
+        else:
+            reply = ("I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+                     "I'll just need to ask a few quick questions. Is that okay?")
+        return reply, session_state, True, None
+
     if active_booking_flow:
         booking_step = session_state.get("booking_step", "intro")
         preferences = session_state.get("booking_preferences", {})
@@ -660,7 +691,11 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         answer = user_msg_lower
         
         if question_type == "concern":
-            preferences["concern"] = user_message.strip()
+            # Prioritize AI-extracted concern. If not present, use the raw message.
+            # This handles cases where user says "I already told you I'm stressed"
+            # and the AI correctly extracts "stress".
+            ai_extracted_concern = intent_data.get("user_preferences", {}).get("concern")
+            preferences["concern"] = ai_extracted_concern or user_message.strip()
         elif question_type == "consultation_type":
             if "online" in answer:
                 preferences["consultation_type"] = "Online"

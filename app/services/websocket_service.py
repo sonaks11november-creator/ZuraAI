@@ -199,6 +199,8 @@ async def websocket_chat(websocket: WebSocket, user_id: int):
                     save_session_state(user_id, session_state)
 
             # 6. Post-Response Tasks
+            session_state["last_emotion"] = emotion_data["emotion"]
+            session_state["last_severity"] = emotion_data["severity"]
             save_session_state(user_id, session_state)
             track_mood(db, user_id, emotion_data["emotion"], emotion_data["severity"], context=user_message)
             save_chat_history(db, user_id, user_message, final_reply, emotion_data["emotion"])
