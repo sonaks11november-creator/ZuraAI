@@ -94,7 +94,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     is_emotional_pivot = is_not_a_continuation and is_explicit_emotion
 
     # If a flow is active from a restored session, but the user is starting over with a greeting or new emotion, reset the state.
-    if (is_greeting_reset or is_emotional_pivot) and session_state.get("active_flow"):
+    if (is_greeting_reset or is_emotional_pivot) and (session_state.get("active_flow") or session_state.get("awaiting_confirmation")):
         # This is a strong signal that the user is starting a new conversation,
         # ignoring the restored session state. We should reset the flow state.
         user_id = session_state.get("user_id")
