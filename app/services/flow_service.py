@@ -186,7 +186,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     )
 
     if should_handle_booking:
-        # A) INITIATE/INTERRUPT: A new booking intent is detected, and it's not already the active flow.
+        # A) INITIATE/INTERRUPT: A new booking intent is detected, and it's not already the active flow
         if (is_therapist_booking_intent or is_doctor_booking_intent) and active_flow not in ["therapist_booking", "doctor_booking"]:
             flow_type = "therapist_booking" if is_therapist_booking_intent else "doctor_booking"
             
@@ -195,7 +195,7 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             session_state.pop("pending_flow", None)
             session_state.pop("awaiting_confirmation", None)
             session_state.pop("current_step", None)
-
+            
             booking_preferences = intent_data.get("user_preferences", {})
             current_need = session_state.get("current_need")
             
@@ -203,30 +203,30 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             if not booking_preferences.get("concern") and current_need:
                 booking_preferences["concern"] = current_need
             session_state["booking_preferences"] = booking_preferences
-
+            
             # If we have the concern (from context or intent), we can skip the intro and ask the next relevant question.
             if booking_preferences.get("concern"):
                 if flow_type == "therapist_booking":
                     next_question, preference_key = _get_next_booking_question(booking_preferences)
                 else: # doctor_booking
                     next_question, preference_key = _get_next_doctor_booking_question(booking_preferences)
-                
+                    
                 if next_question:
                     session_state["booking_step"] = preference_key
                     reply = f"Of course. Since you mentioned you're feeling {booking_preferences['concern']}, I can help you find an expert for support. {next_question}"
                     return reply, session_state, True, None
                 # If no next question, it means all info was in the first message. Fall through to find experts.
-            
             else: # We don't have a concern, so start with the standard confirmation intro.
                 session_state["booking_step"] = "intro"
-                reply = (
-                    "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
-                    "I'll just need to ask a few quick questions. Is that okay?"
-                )
                 if flow_type == "doctor_booking":
                     reply = (
                         "Of course, I can help with that. To find the right Mibo expert, "
                         "I'll just need to ask a couple of quick questions. Is that okay?"
+                    )
+                else:
+                    reply = (
+                        "I'd be happy to help you find the right Mibo expert. To recommend someone who best matches your needs, "
+                        "I'll just need to ask a few quick questions. Is that okay?"
                     )
                 return reply, session_state, True, None
 
@@ -235,19 +235,39 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         if booking_step == "intro":
             affirmative_responses = ["yes", "ok", "okay", "sure", "yeah", "yep", "yup", "go ahead", "let's do it"]
             if not any(resp == user_msg_lower or user_msg_lower.startswith(resp + " ") for resp in affirmative_responses):
+                # User said no to starting the flow
                 session_state["active_flow"] = None
                 session_state.pop("booking_step", None)
                 session_state.pop("booking_preferences", None)
                 return "Okay, no problem. What would you like to do instead?", session_state, True, None
-        elif booking_step: # Ensure booking_step is not None before using it as a key
+            # If user says yes, we fall through to ask the first question.
+            session_state['booking_step'] = None # Clear 'intro' to proceed
+
+        elif booking_step == "expert_action":
+            # This is where user interacts with recommendations (view profile, compare, book, refine)
+            if "profile" in user_msg_lower:
+                return "Which expert's profile would you like to view?", session_state, True, None
+            elif "book" in user_msg_lower:
+                return "Okay, I can help you book. Which expert would you like to book with?", session_state, True, None
+            elif "refine" in user_msg_lower:
+                session_state["booking_step"] = "concern" # Go back to the first question
+                session_state["booking_preferences"] = {} # Clear preferences to restart
+                return "Okay, let's refine your search. What would you like support with today?", session_state, True, None
+            # If user says "ok" or something generic, re-prompt the options
+            reply = "What would you like to do next with the recommended experts?\n"
+            reply += "• View an expert's full profile\n"
+            reply += "• Compare the recommended experts\n"
+            reply += "• Book an appointment\n"
+            reply += "• Refine search"
+            return reply, session_state, True, None
+
+        elif booking_step: # Gather preference if a step is defined
             preferences[booking_step] = user_message
             session_state["booking_preferences"] = preferences
 
         # C) DETERMINE NEXT STEP OR FINISH: Get the next question or find experts.
-        if active_flow == "therapist_booking":
-            next_question, preference_key = _get_next_booking_question(preferences)
-        else: # doctor_booking
-            next_question, preference_key = _get_next_doctor_booking_question(preferences)
+        next_question, preference_key = (_get_next_booking_question(preferences) if active_flow == "therapist_booking" 
+                                         else _get_next_doctor_booking_question(preferences))
 
         if next_question:
             session_state["booking_step"] = preference_key
@@ -262,41 +282,26 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 role_override=role_override
             )
             if not experts:
-                reply = "I'm sorry, I couldn't find any experts that match your preferences right now. Would you like to change your preferences and try again?"
+                session_state["booking_step"] = "concern" # Reset to first question
+                session_state["booking_preferences"] = {}
+                reply = "I'm sorry, I couldn't find any experts that match your preferences right now. Would you like to change your preferences and try again? Let's start over: what would you like support with?"
+                return reply, session_state, True, None
             else:
                 reply = "Great, thank you. Based on what you've told me, here are a few experts who might be a good fit:\n\n"
-                # This part is simplified for brevity, the full expert formatting logic will be here.
-                reply += f"1. **{experts[0]['name']}** ({experts[0]['role']})"
-            session_state["active_flow"] = None
-            # --- FIX: Preserve booking state for post-recommendation actions ---
-            session_state["active_flow"] = flow_type # Keep booking flow active
-            session_state["booking_step"] = "expert_action" # New step for user action
-            session_state["recommended_experts"] = experts # Store experts
+                for i, expert in enumerate(experts):
+                    reply += f"{i+1}. **{expert['name']}** ({expert['role']})\n"
+                
+                session_state["booking_step"] = "expert_action" # Set state for next turn
+                session_state["recommended_experts"] = experts # Store experts
 
-            reply += "\n\nWhat would you like to do next?\n"
-            reply += "• View an expert's full profile\n"
-            reply += "• Compare the recommended experts\n"
-            reply += "• Book an appointment\n"
-            reply += "• Refine search"
-            # --- END FIX ---
+                reply += "\nWhat would you like to do next?\n"
+                reply += "• View an expert's full profile\n"
+                reply += "• Compare the recommended experts\n"
+                reply += "• Book an appointment\n"
+                reply += "• Refine search"
 
             return reply, session_state, True, None
 
-        # --- NEW: Handle expert_action step ---
-        elif booking_step == "expert_action":
-            # This is where user interacts with recommendations (view profile, compare, book, refine)
-            # For now, a simple placeholder. This needs detailed implementation based on user input.
-            if "profile" in user_msg_lower:
-                return "Which expert's profile would you like to view?", session_state, True, None
-            elif "book" in user_msg_lower:
-                return "Okay, I can help you book. Which expert would you like to book with?", session_state, True, None
-            elif "refine" in user_msg_lower:
-                session_state["booking_step"] = "concern" # Go back to the first question or a specific refinement step
-                return "Okay, what would you like to change in your search criteria?", session_state, True, None
-            # If user says "ok" or something generic, re-prompt the options
-            return "What would you like to do next with the recommended experts?", session_state, True, None
-
-        # --- END NEW ---
 
     # --- NEW PRIORITY 0.06: HANDLE PENDING EXPERT CONFIRMATION ---
     # This block handles the user's response after ZuraAI has offered to suggest an expert post-crisis.
