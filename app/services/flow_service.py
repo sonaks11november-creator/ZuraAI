@@ -67,6 +67,22 @@ def _get_next_doctor_booking_question(preferences: dict):
 
     return None, None # All info gathered
 
+def _format_expert_profile(expert: dict):
+    """Formats an expert's profile into a readable string."""
+    if not expert:
+        return "No expert details available."
+    
+    profile = f"**{expert.get('name', 'N/A')}**\n"
+    profile += f"_{expert.get('role', 'Expert')}_\n\n"
+    profile += f"**Experience:** {expert.get('experience', 'N/A')}\n"
+    profile += f"**Specializations:** {', '.join(expert.get('specializations', ['N/A']))}\n"
+    profile += f"**Languages:** {', '.join(expert.get('languages', ['N/A']))}\n"
+    profile += f"**Consultation Types:** {', '.join(expert.get('consultation_types', ['N/A']))}\n"
+    if "In-person" in expert.get('consultation_types', []):
+        profile += f"**Location:** {expert.get('city', 'N/A')}\n"
+    
+    return profile
+
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
     Returns (reply, updated_state, flow_active, pending_intent_to_process)
@@ -142,10 +158,6 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     ]
     is_continuation = any(c == user_msg_lower or user_msg_lower.startswith(c + " ") for c in continuations) or \
                       any(word in user_msg_lower for word in ["done", "finished", "completed"])
-
-    # Helper for explicit safety confirmation
-    explicit_safety_keywords = ["i'm safe", "i am safe", "not in danger", "i'm okay now", "i am okay now", "i'm fine now", "yes i'm safe", "yes i am safe", "i won't hurt myself"]
-    is_explicit_safety_confirmation = any(keyword in user_msg_lower for keyword in explicit_safety_keywords) or user_msg_lower == "yes" # "yes" is a strong safety confirmation if asked "Are you safe?"
 
     # Initialize pending intent to process after crisis resolution
     pending_intent_to_process = None
@@ -245,8 +257,9 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
 
         elif booking_step == "expert_action":
             # This is where user interacts with recommendations (view profile, compare, book, refine)
-            if "profile" in user_msg_lower:
-                return "Which expert's profile would you like to view?", session_state, True, None
+            if "profile" in user_msg_lower or "view" in user_msg_lower:
+                session_state["booking_step"] = "expert_profile_selection" # Set state to wait for selection
+                return "Which expert's profile would you like to view? You can tell me their name or number from the list.", session_state, True, None
             elif "book" in user_msg_lower:
                 return "Okay, I can help you book. Which expert would you like to book with?", session_state, True, None
             elif "refine" in user_msg_lower:
@@ -254,12 +267,41 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["booking_preferences"] = {} # Clear preferences to restart
                 return "Okay, let's refine your search. What would you like support with today?", session_state, True, None
             # If user says "ok" or something generic, re-prompt the options
-            reply = "What would you like to do next with the recommended experts?\n"
+            reply = "What would you like to do next?\n"
             reply += "• View an expert's full profile\n"
             reply += "• Compare the recommended experts\n"
             reply += "• Book an appointment\n"
             reply += "• Refine search"
             return reply, session_state, True, None
+
+        elif booking_step == "expert_profile_selection":
+            recommended_experts = session_state.get("recommended_experts", [])
+            selected_expert = None
+
+            # Try to match by number
+            if user_message.strip().isdigit():
+                index = int(user_message.strip()) - 1
+                if 0 <= index < len(recommended_experts):
+                    selected_expert = recommended_experts[index]
+            
+            # If not found by number, try to match by name
+            if not selected_expert:
+                name_query = user_message.strip().lower()
+                for expert in recommended_experts:
+                    expert_name = expert.get("name", "").lower()
+                    if name_query in expert_name:
+                        selected_expert = expert
+                        break
+            
+            if selected_expert:
+                session_state["selected_expert"] = selected_expert
+                session_state["booking_step"] = "expert_action" # Return to the main action menu
+                profile_details = _format_expert_profile(selected_expert)
+                reply = f"{profile_details}\n\nWhat would you like to do next?\n• Book an appointment\n• View another profile\n• Refine your search"
+                return reply, session_state, True, None
+            else:
+                # Could not find the expert. Re-prompt but stay in the selection state.
+                return "I'm sorry, I couldn't find an expert with that name or number in the list. Please try again.", session_state, True, None
 
         elif booking_step: # Gather preference if a step is defined
             preferences[booking_step] = user_message
@@ -396,31 +438,49 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
         user_name_for_flow = user_name or session_state.get("user_name", "there")
         current_crisis_status = crisis_state.get("status")
 
+        # --- CONTEXT-AWARE BOOLEANS FOR CRISIS FLOW ---
+        # These flags determine the meaning of "yes" or "no" based on the question asked (i.e., the current state).
+
+        # 1. Check for explicit safety phrases that are always safe.
+        explicit_safety_keywords = ["i'm safe", "i am safe", "not in danger", "i'm okay now", "i am okay now", "i'm fine now", "yes i'm safe", "yes i am safe", "i won't hurt myself"]
+        is_explicit_safety_phrase = any(keyword in user_msg_lower for keyword in explicit_safety_keywords)
+
+        # 2. Determine if "yes" means the user is confirming they are safe.
+        # This is only true if we asked "Are you safe?".
+        is_safety_question_context = current_crisis_status in [
+            CRISIS_STATUS_SAFETY_CHECK,
+            CRISIS_STATUS_PENDING_RESOLUTION,
+            CRISIS_STATUS_HELP_CONTACTED
+        ]
+        is_yes_as_safe = user_msg_lower == "yes" and is_safety_question_context
+        
+        # Combine them: user is safe if they use an explicit phrase OR say "yes" to a safety question.
+        is_explicit_safety_confirmation = is_explicit_safety_phrase or is_yes_as_safe
+
+        # 3. Check for explicit danger phrases.
         IMMEDIATE_DANGER_PHRASES = [
-            "i'm not safe", "i am not safe", "no i'm not safe", "not safe", "i'm not safe now",
-            "i'm not okay", "i am not okay",
-            "i'm alone", "i am alone", "always alone",
-            "this is my last message", "last message", "last messgase", # Includes user typo
-            "i can't do this anymore", "i give up", "i want to die", "i want to end my life",
-            "i'm going to hurt myself", "i'm going to kill myself", "i don't want to live",
-            "there's no point", "no point in living", "i wish i was dead", "i just want it to end",
-            "i can't go on", "i'm done", "i'm giving up", "i'm so tired of fighting",
-            "i'm in so much pain", "i can't take it anymore", "i need to escape",
-            "i'm a burden", "everyone would be better off without me", "i don't belong here",
-            "i feel trapped", "i have no hope", "i'm worthless", "i'm a failure",
-            "i'm ready to go", "i'm ready to leave", "i'm ready to check out",
-            "i'm planning to", "i have a plan", "i'm thinking about how to",
-            "i'm going to do it", "i will do it", "i'm serious", "this isn't a joke",
-            "i'm not kidding", "i'm not playing", "i'm not well", "i'm not okay",
-            "i'm not good", "i'm not feeling good", "i'm not feeling well",
-            "i'm not feeling okay", "i'm not feeling alright", "i'm not feeling right",
-            "i'm not feeling myself", "i'm not feeling like myself", "i'm not feeling like i used to",
-            "i'm not feeling like i should", "i'm not feeling like i want to",
-            "goodbye", "good bye", "goodby",
+            "i'm not safe", "i am not safe", "no i'm not safe", "not safe", "i'm not safe now", "i'm not okay", "i am not okay",
+            "i'm alone", "i am alone", "always alone", "this is my last message", "last message", "last messgase",
+            "i can't do this anymore", "i give up", "i want to die", "i want to end my life", "i'm going to hurt myself",
+            "i'm going to kill myself", "i don't want to live", "there's no point", "no point in living", "i wish i was dead",
+            "i just want it to end", "i can't go on", "i'm done", "i'm giving up", "i'm so tired of fighting",
+            "i'm in so much pain", "i can't take it anymore", "i need to escape", "i'm a burden",
+            "everyone would be better off without me", "i don't belong here", "i feel trapped", "i have no hope",
+            "i'm worthless", "i'm a failure", "i'm ready to go", "i'm ready to leave", "i'm ready to check out",
+            "i'm planning to", "i have a plan", "i'm thinking about how to", "i'm going to do it", "i will do it",
+            "i'm serious", "this isn't a joke", "i'm not kidding", "i'm not playing", "i'm not well", "i'm not okay",
+            "i'm not good", "i'm not feeling good", "i'm not feeling well", "i'm not feeling okay", "i'm not feeling alright",
+            "i'm not feeling right", "i'm not feeling myself", "i'm not feeling like myself", "goodbye", "good bye", "goodby",
             "i can't go on", "no point", "end it all"
         ]
-        # "no" is a strong danger signal if asked "Are you safe?"
-        is_immediate_danger = any(phrase in user_msg_lower for phrase in IMMEDIATE_DANGER_PHRASES) or (user_msg_lower == "no" and current_crisis_status in [CRISIS_STATUS_SAFETY_CHECK, CRISIS_STATUS_PENDING_RESOLUTION])
+        is_explicit_danger_phrase = any(phrase in user_msg_lower for phrase in IMMEDIATE_DANGER_PHRASES)
+
+        # 4. Determine if "yes" means danger (asked "Are you in danger?") or "no" means danger (asked "Are you safe?").
+        is_yes_as_danger = user_msg_lower == "yes" and current_crisis_status == CRISIS_STATUS_HELP_SHOWN
+        is_no_as_danger = user_msg_lower == "no" and is_safety_question_context
+
+        # Combine them: user is in danger if they use a danger phrase OR say "yes" to danger question OR "no" to safety question.
+        is_immediate_danger = is_explicit_danger_phrase or is_yes_as_danger or is_no_as_danger
         
         # --- INTENT-FIRST HANDLING ---
         # These checks have priority over generic state-based responses.
