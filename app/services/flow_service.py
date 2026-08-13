@@ -2,6 +2,7 @@
 import json
 import re
 from app.services.redis_service import redis_client, SimpleCache
+from datetime import date, timedelta
 from app.services.therapy_service import get_next_flow_step
 from app.services import assessment_service
 from app.services import care_navigator_service, therapy_service
@@ -101,6 +102,80 @@ def _format_expert_comparison(experts: list):
         reply += "\n"
         
     return reply
+
+def _parse_booking_date(message: str) -> date | None:
+    """
+    Parses a natural language or formatted date string into a datetime.date object.
+    Handles "today", "tomorrow", "day after tomorrow", YYYY-MM-DD, DD-MM, DD/MM,
+    Month Day, Day Month, and day of week.
+    """
+    message_lower = message.lower().strip()
+    today = date.today()
+
+    if message_lower == "today":
+        return today
+    elif message_lower == "tomorrow":
+        return today + timedelta(days=1)
+    elif message_lower == "day after tomorrow":
+        return today + timedelta(days=2)
+    
+    # YYYY-MM-DD format
+    date_match = re.match(r"(\d{4})-(\d{2})-(\d{2})", message_lower)
+    if date_match:
+        try:
+            year, month, day = map(int, date_match.groups())
+            return date(year, month, day)
+        except ValueError:
+            pass
+
+    # DD-MM or DD/MM (assuming current year)
+    date_match_dm = re.match(r"(\d{1,2})[/-](\d{1,2})", message_lower)
+    if date_match_dm:
+        try:
+            day, month = map(int, date_match_dm.groups())
+            return date(today.year, month, day)
+        except ValueError:
+            pass
+
+    # Month Day (e.g., "August 15", "15 August")
+    month_names = {
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+    }
+    
+    # "August 15"
+    month_day_match = re.match(r"([a-z]+)\s+(\d{1,2})", message_lower)
+    if month_day_match:
+        month_str, day_str = month_day_match.groups()
+        month_num = month_names.get(month_str)
+        if month_num:
+            try:
+                return date(today.year, month_num, int(day_str))
+            except ValueError:
+                pass
+    
+    # "15 August"
+    day_month_match = re.match(r"(\d{1,2})\s+([a-z]+)", message_lower)
+    if day_month_match:
+        day_str, month_str = day_month_match.groups()
+        month_num = month_names.get(month_str)
+        if month_num:
+            try:
+                return date(today.year, month_num, int(day_str))
+            except ValueError:
+                pass
+
+    # Day of week (e.g., "Monday") - for simplicity, assume next occurrence
+    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    if message_lower in day_names:
+        current_weekday = today.weekday() # Monday is 0, Sunday is 6
+        target_weekday = day_names.index(message_lower)
+        days_ahead = (target_weekday - current_weekday + 7) % 7
+        if days_ahead == 0: # If today is that day, assume next week
+            days_ahead = 7
+        return today + timedelta(days=days_ahead)
+
+    return None
 
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
@@ -360,6 +435,53 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             else:
                 # Could not find the expert. Re-prompt but stay in the selection state.
                 return "I'm sorry, I couldn't find an expert with that name or number in the list. Please try again.", session_state, True, None
+
+        elif booking_step == "booking_date_selection":
+            requested_date = _parse_booking_date(user_message)
+            if requested_date:
+                session_state["booking_date"] = requested_date.isoformat() # Store as ISO format string
+                session_state["booking_step"] = "booking_time_selection"
+                selected_expert_name = session_state.get("selected_expert", {}).get("name", "the expert")
+                # Placeholder for fetching actual available times
+                # For now, just ask for a time
+                reply = f"Okay, for {selected_expert_name} on {requested_date.strftime('%A, %B %d')}. What time would you prefer? (e.g., 10 AM, 2:30 PM)"
+                return reply, session_state, True, None
+            else:
+                # Invalid date format, re-prompt
+                return "I'm sorry, I didn't understand that date. Please tell me the date you'd like to book (e.g., 'tomorrow', 'August 15', or '2024-08-15').", session_state, True, None
+
+        elif booking_step == "booking_time_selection":
+            # This is where you would parse the time and confirm the booking
+            # For now, just a placeholder to show it's advancing
+            session_state["booking_time"] = user_message # Store raw time for now
+            session_state["booking_step"] = "booking_confirmation"
+            selected_expert_name = session_state.get("selected_expert", {}).get("name", "the expert")
+            booking_date = session_state.get("booking_date")
+            
+            # You would typically fetch available slots here and present them.
+            # For now, a simple confirmation.
+            reply = f"Confirming your booking with {selected_expert_name} on {booking_date} at {user_message}. Is that correct?"
+            return reply, session_state, True, None
+
+        elif booking_step == "booking_confirmation":
+            # This state would handle the final 'yes' or 'no' to confirm the booking.
+            # For now, we'll just acknowledge and end the flow.
+            if user_msg_lower in ["yes", "yep", "confirm"]:
+                session_state["active_flow"] = None # End the booking flow
+                session_state.pop("booking_step", None)
+                session_state.pop("booking_preferences", None)
+                session_state.pop("selected_expert", None)
+                session_state.pop("booking_date", None)
+                session_state.pop("booking_time", None)
+                return "Great! Your appointment has been successfully booked. You'll receive a confirmation shortly.", session_state, True, None
+            else:
+                session_state["active_flow"] = None # End the booking flow
+                session_state.pop("booking_step", None)
+                session_state.pop("booking_preferences", None)
+                session_state.pop("selected_expert", None)
+                session_state.pop("booking_date", None)
+                session_state.pop("booking_time", None)
+                return "Okay, the booking has been cancelled. What would you like to do instead?", session_state, True, None
 
         elif booking_step: # Gather preference if a step is defined
             preferences[booking_step] = user_message
