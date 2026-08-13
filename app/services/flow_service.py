@@ -261,7 +261,8 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["booking_step"] = "expert_profile_selection" # Set state to wait for selection
                 return "Which expert's profile would you like to view? You can tell me their name or number from the list.", session_state, True, None
             elif "book" in user_msg_lower:
-                return "Okay, I can help you book. Which expert would you like to book with?", session_state, True, None
+                session_state["booking_step"] = "booking_expert_selection" # Set state to wait for selection
+                return "Okay, I can help you book. Which expert would you like to book with? You can tell me their name or number.", session_state, True, None
             elif "refine" in user_msg_lower:
                 session_state["booking_step"] = "concern" # Go back to the first question
                 session_state["booking_preferences"] = {} # Clear preferences to restart
@@ -298,6 +299,34 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
                 session_state["booking_step"] = "expert_action" # Return to the main action menu
                 profile_details = _format_expert_profile(selected_expert)
                 reply = f"{profile_details}\n\nWhat would you like to do next?\n• Book an appointment\n• View another profile\n• Refine your search"
+                return reply, session_state, True, None
+            else:
+                # Could not find the expert. Re-prompt but stay in the selection state.
+                return "I'm sorry, I couldn't find an expert with that name or number in the list. Please try again.", session_state, True, None
+
+        elif booking_step == "booking_expert_selection":
+            recommended_experts = session_state.get("recommended_experts", [])
+            selected_expert = None
+
+            # Try to match by number
+            if user_message.strip().isdigit():
+                index = int(user_message.strip()) - 1
+                if 0 <= index < len(recommended_experts):
+                    selected_expert = recommended_experts[index]
+            
+            # If not found by number, try to match by name
+            if not selected_expert:
+                name_query = user_message.strip().lower()
+                for expert in recommended_experts:
+                    expert_name = expert.get("name", "").lower()
+                    if name_query in expert_name:
+                        selected_expert = expert
+                        break
+            
+            if selected_expert:
+                session_state["selected_expert"] = selected_expert
+                session_state["booking_step"] = "booking_date_selection" # Transition to the next step in the booking process
+                reply = f"Great, you've selected {selected_expert['name']}. What date would you like to book your appointment?"
                 return reply, session_state, True, None
             else:
                 # Could not find the expert. Re-prompt but stay in the selection state.
