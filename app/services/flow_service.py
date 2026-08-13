@@ -83,6 +83,25 @@ def _format_expert_profile(expert: dict):
     
     return profile
 
+def _format_expert_comparison(experts: list):
+    """Formats a comparison of multiple experts into a readable string."""
+    if not experts:
+        return "No experts available to compare."
+
+    reply = "Here's a comparison of the recommended experts:\n\n"
+    
+    for i, expert in enumerate(experts):
+        reply += f"**{i+1}. {expert.get('name', 'N/A')}** ({expert.get('role', 'Expert')})\n"
+        reply += f"  • **Specializations:** {', '.join(expert.get('specializations', ['N/A']))}\n"
+        reply += f"  • **Experience:** {expert.get('experience', 'N/A')}\n"
+        reply += f"  • **Languages:** {', '.join(expert.get('languages', ['N/A']))}\n"
+        reply += f"  • **Consultation:** {', '.join(expert.get('consultation_types', ['N/A']))}\n"
+        if "In-person" in expert.get('consultation_types', []):
+            reply += f"  • **Location:** {expert.get('city', 'N/A')}\n"
+        reply += "\n"
+        
+    return reply
+
 def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict = None, emotion_data: dict = None, db=None, user_name: str = None):
     """
     Returns (reply, updated_state, flow_active, pending_intent_to_process)
@@ -260,6 +279,16 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
             if "profile" in user_msg_lower or "view" in user_msg_lower:
                 session_state["booking_step"] = "expert_profile_selection" # Set state to wait for selection
                 return "Which expert's profile would you like to view? You can tell me their name or number from the list.", session_state, True, None
+            elif "compare" in user_msg_lower:
+                recommended_experts = session_state.get("recommended_experts", [])
+                comparison_text = _format_expert_comparison(recommended_experts)
+                
+                # After showing comparison, present the next actions.
+                reply = f"{comparison_text}\nWhat would you like to do next?\n"
+                reply += "• View an expert's full profile\n"
+                reply += "• Book an appointment\n"
+                reply += "• Refine search"
+                return reply, session_state, True, None
             elif "book" in user_msg_lower:
                 session_state["booking_step"] = "booking_expert_selection" # Set state to wait for selection
                 return "Okay, I can help you book. Which expert would you like to book with? You can tell me their name or number.", session_state, True, None
