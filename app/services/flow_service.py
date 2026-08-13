@@ -348,6 +348,18 @@ def handle_flow_logic(user_message: str, session_state: dict, intent_data: dict 
     # --- NEW PRIORITY 0.06: HANDLE PENDING EXPERT CONFIRMATION ---
     # This block handles the user's response after ZuraAI has offered to suggest an expert post-crisis.
     if session_state.get("awaiting_expert_confirmation"):
+        # Check if the user's message is a new, strong intent that should override the pending expert confirmation.
+        # This prevents "I'm feeling stressed" from being interpreted as an unclear response to "suggest an expert?".
+        # We allow booking intents to still be processed here if they are explicit, as they are high priority.
+        if intent_data.get("intent") not in ["General chat", "None"] and \
+           intent_data.get("intent") not in ["Therapist Booking", "Doctor Booking", "CRISIS_EMERGENCY_CONTACT_REQUEST"] and \
+           intent_data.get("risk_level") != "critical":
+            
+            # A new, non-booking, non-crisis intent detected. Clear pending expert confirmation and let the new intent be processed.
+            session_state["awaiting_expert_confirmation"] = False
+            print(f"DEBUG: Overriding pending expert confirmation due to new intent: {intent_data.get('intent')}")
+            # Fall through to other flow logic (e.g., wellness flow initiation)
+            return None, session_state, False, None
         affirmative_responses = ["yes", "yeah", "sure", "yep", "yup", "i would like that", "let's do it", "go ahead", "start", "book", "suggest"]
         negative_responses = ["no", "no thanks", "not now", "not really", "i don't want to", "i don't need"]
 
